@@ -125,6 +125,25 @@ the n-gram lookups are Python dict operations that a GPU contributes
 nothing to. If you have a GPU, don't bother. Run
 `python benchmark.py --both` to reproduce.
 
+## Embedding space
+
+![embedding 3D](assets/embedding_3d.png)
+
+PCA of the evolved 768-dim embedding for the top 2,000 most common
+word tokens, projected to 3D. The grey cloud is the full set; the
+coloured groups are hand-picked semantic clusters (countries, verbs,
+numbers, colors, royalty, science). PC1, PC2, PC3 together explain
+roughly 8% of the variance, so what you are seeing is a low-dimensional
+shadow of a very high-dimensional space. Two more angles for the
+same projection are saved in `assets/embedding_3d_front.png` and
+`assets/embedding_3d_side.png`.
+
+The clusters do separate, not perfectly but visibly. Numbers and
+colors form their own pockets, royalty words sit near each other,
+and countries clump on one side. None of this was supervised. The
+embedding was evolved against a co-occurrence objective, and the
+grouping fell out as a side effect.
+
 ## Checkpoint breakdown
 
 ![checkpoint sizes](assets/checkpoint_sizes.png)
