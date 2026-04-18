@@ -1,41 +1,49 @@
 # GENREG LM
 
-A language-model-shaped pipeline trained **without gradient descent
-and without backpropagation**. Parameters were discovered by
-evolutionary search; the n-gram statistics were tabulated directly
-from a corpus.
+A language-model-shaped pipeline trained without gradient descent and
+without backpropagation. Parameters were discovered by evolutionary
+search. The n-gram statistics were counted directly from a corpus.
 
-It is a research artifact, not a useful chatbot. Expect short
-English-shaped fragments — and a lot of honest failure modes along
-the way.
+It is a research artifact, not a chatbot. Expect short English-shaped
+fragments.
 
-## Be warned
+## Calibrate your expectations
 
-If you come here expecting GPT-2, you will leave disappointed. A few
-things to calibrate before trying:
+If you came here expecting GPT-2, you are in the wrong repo.
 
-- Output is **phrase-level, not sentence-level**. You will recognize
-  English words and short phrases; you will not get coherent answers
+- Output is phrase-level, not sentence-level. You will recognize
+  English words and short phrases. You will not get coherent answers
   or multi-sentence paragraphs.
-- Topic drifts every 10–20 tokens. The model has no real long-range
+- Topic drifts every 10 to 20 tokens. The model has no long-range
   memory.
-- The learned attention stack **actively makes generation worse**
-  when blended with the n-gram cascade (see below). Best outputs come
-  from pure n-gram (`/ngram 1.0`), which is almost entirely corpus
-  statistics, not learned parameters.
+- The evolved attention stack actively makes generation worse when
+  blended with the n-gram cascade. Best outputs come from pure n-gram
+  (`/ngram 1.0`), which is mostly corpus statistics, not learned
+  parameters.
 - There is no instruction-following, no dialog, no reasoning. Asking
   it a question will produce text that sometimes looks like an answer
   and usually isn't.
 - Numbers, rare words, proper nouns, and punctuation are all weak
   spots.
 
-What is interesting is that the pipeline runs at all: every learned
-weight was produced without gradients, on a single GPU, in hours of
-evolution rather than days of backprop.
+If that still sounds interesting: the pipeline runs at all, without a
+gradient, on a single GPU, in hours of evolution instead of days of
+backprop.
 
-## What you get
+## Where this is going
 
-A tiny end-to-end LM that you can poke at interactively:
+This is a first working end-to-end build, not the final one. The
+interesting result is that the evolutionary substrate is now
+well-enough understood that I can pick a fitness signal, know roughly
+how the population will move under it, and get a component that does
+approximately the thing I asked for. The next iteration is expected
+to be larger and better, not by brute-forcing more compute but by
+applying what the last round of experiments taught about which
+landscape pressures actually produce useful language behavior.
+
+Treat this release as version 0.
+
+## The pipeline
 
 ```
 tokens
@@ -47,8 +55,8 @@ tokens
   -> sample
 ```
 
-All weights were evolved. The n-gram tables are pre-computed corpus
-statistics — not learned, just counted.
+Every learned weight was evolved. The n-gram tables are pre-computed
+corpus statistics, not learned parameters.
 
 ## Install
 
@@ -56,8 +64,8 @@ statistics — not learned, just counted.
 pip install -r requirements.txt
 ```
 
-PyTorch and NumPy only. Python 3.8+. A GPU is **not** required and
-will in fact slow you down (see below).
+PyTorch and NumPy. Python 3.8+. A GPU is not required and will slow
+you down (see CPU vs GPU below).
 
 ## Quick start
 
@@ -80,17 +88,15 @@ python benchmark.py            # CPU
 python benchmark.py --both     # CPU and GPU side by side
 ```
 
-Commands inside the REPL: `/temp <f>`, `/topk <n>`, `/len <n>`,
-`/ngram <f>` (0 = pure attention head, 1 = pure n-gram; 1.0 gives
-the best output), `/rep <f>`, `/quit`.
+REPL commands: `/temp <f>`, `/topk <n>`, `/len <n>`, `/ngram <f>`
+(0 for pure attention head, 1 for pure n-gram; 1.0 is best), `/rep <f>`,
+`/quit`.
 
-## Actual performance
-
-### Next-token accuracy (honest)
+## Next-token accuracy
 
 ![accuracy](assets/accuracy.png)
 
-855 held-out positions from the WikiText-103 tail, character tokens
+855 held-out positions from the WikiText-103 tail. Character tokens
 excluded from scoring.
 
 | method | top-1 |
@@ -100,45 +106,41 @@ excluded from scoring.
 | Bigram argmax | 16.8 % |
 | Trigram argmax | 19.4 % |
 | 4-gram cascade argmax | 20.9 % |
-| **This model top-1** | **27.0 %** |
-| **This model top-5** | **51.5 %** |
+| This model top-1 | 27.0 % |
+| This model top-5 | 51.5 % |
 
-We beat the plain n-gram baselines by ~6 pp on top-1, but we do not
-beat the best transformer LMs trained with backprop. Nothing in this
-repo can match those numbers.
+We beat the plain n-gram baselines by roughly 6 points on top-1. We
+do not beat transformer LMs. A large share of the 27 % comes from the
+n-gram cascade itself. The evolved attention and prediction head lift
+things by another few points on top, which is the part that actually
+required evolution.
 
-A large share of "this model"'s score comes from the n-gram cascade
-itself. The evolved attention + head contribute something on top,
-but the gap between "n-gram only" (20.9 %) and "full pipeline"
-(27.0 %) is where all the evolution actually pays off.
-
-### CPU vs GPU
+## CPU vs GPU
 
 ![cpu vs gpu](assets/cpu_vs_gpu.png)
 
-CPU is about 2× faster than a RTX 4080 for this workload. The model
+CPU is about 2x faster than a RTX 4080 for this workload. The model
 is too small to amortize GPU kernel-launch and transfer overhead, and
-the n-gram lookups are pure Python dict operations that a GPU
-contributes nothing to. If you have a GPU, don't bother using it.
+the n-gram lookups are Python dict operations that a GPU contributes
+nothing to. If you have a GPU, don't bother. Run
+`python benchmark.py --both` to reproduce.
 
-Run `python benchmark.py --both` to reproduce on your own hardware.
-
-### Checkpoint breakdown
+## Checkpoint breakdown
 
 ![checkpoint sizes](assets/checkpoint_sizes.png)
 
-~89 MB total. No single file exceeds 25 MB so the repository ships
-cleanly to GitHub without LFS. Notice that ~40 % of the "model" is
-actually just the n-gram tables — the counted, not the learned part.
+About 89 MB total. No single file exceeds 25 MB, so the repo ships
+without Git LFS. Roughly 40 % of "the model" is actually the n-gram
+tables (counted, not learned).
 
-### Size context (with caveats)
+## Size context, with the obvious caveat
 
 ![size comparison](assets/size_comparison.png)
 
 Yes, this is smaller than GPT-2 on every axis. No, that does not
-mean it is "GPT-2 compressed". GPT-2 can hold a conversation; this
-cannot. The chart is here because people ask, not because it's a
-fair comparison.
+mean this is "GPT-2 compressed." GPT-2 can hold a conversation, this
+cannot. The chart is here because it's the first question people
+ask, not because it's a fair comparison.
 
 ## What it actually outputs
 
@@ -161,33 +163,28 @@ Best mode (pure n-gram, temp 0.4, top-k 20, char-ban on):
   from number eight being
 ```
 
-Fragments that feel like "might have appeared on Wikipedia somewhere"
-are the best case. The attention-only mode (`/ngram 0`) is noticeably
-worse — try it and you will see function-word soup. That degradation
-is real and it tells you what the evolved components currently
-contribute: they lift the n-gram baseline by a few points, but they
-cannot carry generation on their own.
+Fragments that could plausibly have appeared on Wikipedia are the
+best case. Attention-only mode (`/ngram 0`) is noticeably worse. Try
+it if you want to see function-word soup. That degradation tells you
+what the evolved components currently contribute: a small lift above
+the n-gram baseline. They cannot carry generation on their own yet.
 
-## What didn't work (and is still open)
+## Known failure modes
 
-We kept this honest list so the project isn't oversold:
+- Attention hurts generation when blended in. It was evolved against
+  masked-position reconstruction, not against next-token sampling.
+  The fix is to re-evolve it with a distributional fitness instead of
+  top-1 accuracy. That is a later iteration.
+- No FFN between attention and head. GPT-2 has one. This doesn't.
+- Depth does not scale. Stacking a third attention layer on the frozen
+  pair did not help under any fitness variant tried so far. The issue
+  is a property of sequentially freezing layers, not of attention
+  itself.
+- No long-range coherence. N-gram window is 4 tokens. Attention
+  context is 512, but its features don't sample well.
+- Word-level tokenizer. Out-of-vocabulary becomes `<unk>`. No BPE.
 
-- **Attention hurts generation.** Trained for masked-position
-  reconstruction (cloze); not for autoregressive sampling. Blending
-  in any amount of attention-head logits degrades output under
-  sampling. Open problem: re-evolve with a distributional (KL) fitness
-  instead of top-1 accuracy.
-- **No FFN between attention and head.** GPT-2 has one; we don't.
-  Attempted versions so far had diagnostic bugs.
-- **Depth doesn't scale.** Stacking a third attention layer on the
-  frozen pair didn't pay off under any of the fitness variants we
-  tried (residual cloze, curriculum, multi-objective). Sequential
-  frozen attention has a real ceiling around 2 layers.
-- **No long-range coherence.** The n-gram window is 4 tokens; the
-  attention context is 512 but its features don't sample well. Neither
-  component tracks "what sentence is this about".
-- **Vocabulary is word-level.** Out-of-vocabulary words become
-  `<unk>`. No BPE.
+These are the open problems that the next iteration is aimed at.
 
 ## Repository layout
 
@@ -215,42 +212,31 @@ github_repo/
 
 ## Architecture notes
 
-- **Vocabulary.** 51,641 tokens. 4 specials + ~92 characters and
-  punctuation + 51,566 WikiText-103 words appearing >= 5 times. At
-  inference the character tokens (ids < 96) are hard-banned so the
-  model stays word-level.
-
+- **Vocabulary.** 51,641 tokens. 4 specials, ~92 characters and
+  punctuation, 51,566 WikiText-103 words appearing >= 5 times. At
+  inference the character tokens (ids < 96) are banned so the model
+  stays word-level.
 - **Embedding.** Each token id maps to a 768-dim vector through a
-  fixed PPMI-SVD hash plus an evolved linear-plus-activation head
-  with a residual skip. The hash is frozen; the head is evolved.
-
-- **Positional encoding.** 512 positions. Sinusoidal initialization
-  scaled per-dimension by evolved gains, then a per-dimension evolved
-  activation. Preserves >98 % cosine with the bare embedding.
-
-- **Attention.** 2 layers, 6 heads, 128 per head. Each layer has
-  evolved Q/K/V/O projections plus a per-head evolved activation on
-  the logits. Causal masking.
-
-- **Prediction head.** SVD-64 approximation of a ridge-regression
-  fit from attention output to 51,641 logits. Reconstructed as
-  `U * S @ V^T` at load. ~13 MB on disk.
-
-- **N-gram cascade.** 2-, 3-, and 4-gram counts from the training
-  corpus, with short-n fallback. Not learned — tabulated.
-
+  fixed PPMI-SVD hash plus an evolved head with a residual skip.
+- **Positional encoding.** 512 positions. Sinusoidal init scaled per
+  dimension by evolved gains, with a per-dimension evolved activation.
+  Preserves > 98 % cosine with the bare embedding.
+- **Attention.** 2 layers, 6 heads, 128 per head. Evolved Q/K/V/O and
+  per-head evolved activation on the logits. Causal masking.
+- **Prediction head.** SVD-64 approximation of a ridge fit from the
+  last attention output to 51,641 logits. About 13 MB on disk.
+- **N-gram cascade.** 2-, 3-, 4-gram counts from the training corpus,
+  with short-n fallback. Counted, not learned.
 - **Sampling.** Attention logits and scaled n-gram log-probs are
-  blended by a user-set weight. Repetition penalty over the last
-  20 tokens. Character tokens hard-banned. Temperature + top-k
-  multinomial.
+  blended. Repetition penalty over the last 20 tokens. Character
+  tokens are hard-banned. Temperature + top-k multinomial.
 
 ## How was this trained
 
 Evolutionary search. Populations of candidate configurations were
-scored on component-specific fitness functions, the best reproduced
-with mutation. Full training scripts, fitness definitions, and
-hyperparameter schedules are not included in this repository. The
-n-gram tables are a direct count over the training corpus.
+scored on component-specific fitness functions. The best reproduced
+with mutation. Training scripts, fitness definitions, and
+hyperparameter schedules are not included in this repository.
 
 ## License
 
