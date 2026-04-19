@@ -1,10 +1,11 @@
 # GENREG LM
 
-**Version: 2026-04-18 v4-query-adaptive-retrieval** — retrieval
-recall@1 53.3 % (54.0 % with opt-in reranker), extractive answer
-containment 7.7 % on SQuAD v1.1 dev (300-q sample, seed 7). See
-`CHANGELOG.md` for per-version deltas and the four documented
-span-scorer failure modes.
+**Version: 2026-04-19 v5-mlp-span-scorer** — retrieval recall@1
+53.3 %, **extractive answer containment 8.7 %** (up from 7.7 %
+heuristic-only after four failed scorer attempts; +18.0 pp val lift
+from train/val split + containment labels + top-50 filter). SQuAD
+v1.1 dev, 300-q sample, seed 7. See `CHANGELOG.md` for full history
+including the data-leak diagnosis that gated this success.
 
 A chatbot-shaped language model trained **without gradient descent,
 without backpropagation, and without closed-form regression** against
@@ -154,10 +155,11 @@ BM25 (k1=1.2, b=0.5, blend=0.85):
 | retrieval recall@3 | 68.3 % |
 | retrieval recall@10 | 78.0 % |
 | answer containment — no retrieval | 0.3 % |
-| answer containment — **extractive QA** | **7.7 %** |
+| answer containment — heuristic extractive (v4) | 7.7 % |
+| answer containment — **MLP ensemble extractive (v5)** | **8.7 %** |
 | answer containment — RAG generation | 6.0 % |
 | extractive F1 | 0.065 |
-| conditional extraction (given recall@1 hit) | ~11 % |
+| conditional extraction (given recall@1 hit) | ~13 % |
 
 **~26× lift from retrieval** on answer containment (0.3 % → 7.7 %).
 The query-adaptive retrieval reranker at

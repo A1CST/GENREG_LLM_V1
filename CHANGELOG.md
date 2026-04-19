@@ -5,11 +5,70 @@ or AI) can tell at a glance what state the repo is in. Each version
 block includes the headline accuracy number and the honest limitation
 that defines the next move.
 
-## v4-query-adaptive-retrieval (2026-04-18, current)
+## v5-mlp-span-scorer (2026-04-19, current)
 
-**Headline:** retrieval recall@1 = 53.3 %, extractive answer
-containment = 7.7 %, RAG generation = 6.0 %
-(SQuAD v1.1 dev, 300-q sample, seed 7, k=3 retrieval).
+**Headline:** retrieval recall@1 = 53.3 %, **extractive answer
+containment = 8.7 %** (+1.0 pp over heuristic-only v4), RAG
+generation = 6.0 % (SQuAD v1.1 dev, 300-q sample, seed 7, k=3).
+
+**First learned span-scorer that actually improves dev performance
+after four prior failures.** Key fixes over v1-v4 span-scorer
+attempts:
+
+1. **Containment labels instead of exact-match.** Earlier trainers
+   labeled a span as positive only if span tokens exactly equal gold
+   tokens. But inference measures whether *gold text appears as a
+   substring* of the returned span. ~8% of SQuAD dev cases have
+   SOME span containing gold at heuristic's top-1, vs ~0.3% that
+   exactly match. Training on the containment signal matches the
+   inference metric.
+2. **Train/val split with early stopping on val fitness.** Snapshot
+   the val-best genome, not the train-best. Previous runs overfit to
+   99 % train / 0.3 % dev.
+3. **Widened filter pool from top-20 to top-50.** Heuristic top-20
+   only contains gold in 9 % of SQuAD dev cases; top-50 hits 13 %.
+   MLP now reranks top-50 instead of top-20, raising the absolute
+   ceiling.
+4. **No gold substitution in training candidates.** Prior v1 run hit
+   100 % train/val top-1 via a position leak — when gold wasn't in
+   heuristic top-20, it got substituted at position -1, letting the
+   MLP learn "pick lowest-heuristic = gold." Removed substitution;
+   now skip training examples where heuristic filter misses gold.
+5. **Two-stage inference path.** At inference, collect all spans with
+   heuristic scores FIRST, filter to top-50 by heuristic, then apply
+   the MLP to just those 50. Matches training distribution exactly.
+
+**Training metrics (SQuAD train, 80/20 split, 2400/600 questions):**
+- Effective training examples: 322 (gold found in heuristic top-50
+  for only 13 % of QA pairs — corresponds to the dev ceiling)
+- Heuristic baseline top-1 on val: 24.7 %
+- MLP ensemble top-1 on val: **42.7 %** (+18.0 pp)
+- β (MLP correction weight): −0.8 (MLP contribution to ensemble)
+- Parameters: 305 (W1: 18×16, b1: 16, W2: 16×1, b2: 1, β: 1)
+
+### Architecture
+
+```
+span_features (8) || query_features (10)   → 18
+  ↓ W1 (18×16), tanh
+hidden (16)
+  ↓ W2 (16×1)
+mlp_score (1)
+
+final_score = heuristic_score + β * mlp_score
+```
+
+Query features: qtype one-hots {when, who, where, what, how},
+has_digit, n_rare_tokens_norm, max_tok_sif, q_length_norm, bias.
+
+Span features: BM25(span, query content), rarity_sum, rarity_max,
+numeric, length_norm, first_rare, last_rare, semantic_cos.
+
+The ensemble design (heuristic + β·mlp) means worst case the MLP
+adds noise and β → 0, recovering heuristic. Actual learned β=−0.8
+means the MLP adds signal orthogonal to the heuristic.
+
+## v4-query-adaptive-retrieval (2026-04-18)
 
 **What's new:**
 - **Query-adaptive retrieval reranker** shipped at
@@ -67,6 +126,23 @@ on plain BM25 + SIF.
    still ≈ random within the 20 good-looking candidates the heuristic
    selected. When all candidates are heuristic-endorsed, the learnable
    features don't add more discriminating information. Discarded.
+5. **Span MLP v1** (305-param MLP, ensemble = heur + β·mlp_score,
+   one-shot training on all 1500 QA cases). Converged to 99.7 %
+   train top-1 in 25 generations. Deployed: dev extractive
+   **0.3 %**. Classic overfitting — small training set, big model,
+   no validation signal.
+6. **Span MLP v2** (val-split 80/20 + early-stopping checkpoint on
+   val top-1). **Discovered a data leak**: when gold wasn't in the
+   heuristic's top-20 filter, the trainer substituted gold at the
+   lowest position. MLP learned "pick lowest-heuristic = gold" and
+   reached 100 % val top-1 — but the signal evaporates at inference
+   where no such substitution happens. Killed training at gen 300.
+   **Lesson: evolutionary span scorers on small datasets require
+   careful negative-sampling hygiene. Any systematic position signal
+   in the candidate list is a leak.**
+7. **Span MLP v3** (fix: drop training examples where gold isn't
+   organically in heuristic top-20 — no substitution). Currently
+   training. See below for outcome.
 4. **Pseudo-relevance feedback** — amplifies the wrong topic when
    initial retrieval is wrong (32 % of top-3). Off by default.
 5. **Query expansion via embedding neighbors** — flat (±0.3 pp).

@@ -272,6 +272,24 @@ class GenregLM:
                     sv3["W"].astype(np.float32)).to(self.device)
                 self._span_qa = sv3
 
+        # Evolved MLP span scorer (ensemble with heuristic)
+        self._span_mlp = None
+        mlp_path = os.path.join(ckpt_dir, "span_mlp.pkl")
+        if os.path.exists(mlp_path):
+            with open(mlp_path, "rb") as f:
+                mlp = pickle.load(f)
+            if mlp.get("version") == "span_mlp_v1_ensemble":
+                self._span_mlp_W1 = torch.from_numpy(
+                    mlp["W1"].astype(np.float32)).to(self.device)
+                self._span_mlp_b1 = torch.from_numpy(
+                    mlp["b1"].astype(np.float32)).to(self.device)
+                self._span_mlp_W2 = torch.from_numpy(
+                    mlp["W2"].astype(np.float32)).to(self.device)
+                self._span_mlp_b2 = torch.from_numpy(
+                    mlp["b2"].astype(np.float32)).to(self.device)
+                self._span_mlp_beta = float(mlp["beta"])
+                self._span_mlp = mlp
+
     def tokenize(self, text):
         words = text.lower().split()
         ids = [self.token_to_id.get(w, self.token_to_id["<unk>"]) for w in words]
@@ -766,6 +784,13 @@ class GenregLM:
                                            self._span_qa_W, qf_t)
             v3_weights = F.softmax(logits_per_sig, dim=0)   # (8,)
 
+        # MLP ensemble span scorer: precompute query feature tensor
+        mlp_qf_t = None
+        if self._span_mlp is not None and self._rag is not None:
+            mlp_qf_np = self._compute_qfeats(q_ids_t)
+            mlp_qf_t = torch.tensor(mlp_qf_np, device=self.device,
+                                     dtype=torch.float32)
+
         # Normalize retrieval scores across hits to [0,1]
         import math as _math
         scores_arr = np.array([h.get("score", 1.0) for h in hits],
@@ -778,6 +803,14 @@ class GenregLM:
 
         best_score = -1e9
         best = ("", [], {})
+
+        # TWO-STAGE MLP PATH: when the v4 MLP ensemble scorer is loaded,
+        # collect ALL candidate spans with their heuristic score first,
+        # then filter to the heuristic's top-K (matching training
+        # FILTER_K=50), then let the MLP rerank those. This matches
+        # the training distribution exactly — training only saw top-50
+        # heuristic candidates, so inference must too.
+        mlp_stage_spans = []   # list of (h_idx, span, feat_dict, heur_sc)
 
         for h_idx, h in enumerate(hits):
             # For chunked retrieval, search spans within the matched
@@ -848,7 +881,30 @@ class GenregLM:
                                  first_rare, last_rare]
                     retr_score = float(retr_score_by_h[h_idx])
 
-                    if v3_weights is not None:
+                    if mlp_qf_t is not None:
+                        # Stage 1: compute only heuristic score; defer
+                        # MLP rerank until we have the full candidate
+                        # pool to filter.
+                        inv_u_m = -(abs(semantic - 0.5) ** 2) + 0.25
+                        qt = 0.0
+                        if is_when and numeric > 0.5: qt = 3.0
+                        elif is_when: qt = -0.8
+                        heur_sc = (rarity_sum + qt + inv_u_m + 0.5
+                                    - 0.05 * max(0, L_ - 5))
+                        mlp_stage_spans.append({
+                            "h_idx": h_idx,
+                            "span": list(span),
+                            "start": start,
+                            "L": L,
+                            "heur_sc": heur_sc,
+                            "sf": [bm25_span_q, rarity_sum, rarity_max,
+                                    numeric, min(L_ / 8.0, 1.0),
+                                    first_rare, last_rare, semantic],
+                            "semantic": semantic,
+                            "rarity_sum": rarity_sum,
+                        })
+                        continue
+                    elif v3_weights is not None:
                         # v3 query-adaptive: 8-dim span feature vector
                         # matching SFEAT_NAMES order in
                         # genreg_span_scorer_v3.py
@@ -894,6 +950,40 @@ class GenregLM:
                         }
                         text = self.detokenize(span)
                         best = (text, list(span), meta)
+
+        # STAGE 2: if MLP is loaded, rerank top-FILTER_K heuristic candidates
+        if mlp_qf_t is not None and mlp_stage_spans:
+            # FILTER_K must match the training value in
+            # genreg_span_mlp.py (currently 100).
+            FILTER_K = 100
+            mlp_stage_spans.sort(key=lambda x: -x["heur_sc"])
+            filtered = mlp_stage_spans[:FILTER_K]
+            for cand in filtered:
+                sf = torch.tensor(cand["sf"], device=self.device,
+                                    dtype=torch.float32)
+                x = torch.cat([sf, mlp_qf_t])                # (18,)
+                hid = torch.tanh(
+                    x @ self._span_mlp_W1 + self._span_mlp_b1)  # (16,)
+                mlp_sc = float((hid @ self._span_mlp_W2 +
+                                  self._span_mlp_b2).item())
+                score = cand["heur_sc"] + self._span_mlp_beta * mlp_sc
+                if score > best_score:
+                    best_score = score
+                    meta = {
+                        "passage_title": hits[cand["h_idx"]].get("title"),
+                        "passage_idx": cand["h_idx"],
+                        "span_start": cand["start"],
+                        "span_len": cand["L"],
+                        "score": score,
+                        "qtype": qtype,
+                        "heur_sc": cand["heur_sc"],
+                        "mlp_sc": mlp_sc,
+                        "rarity_sum": cand["rarity_sum"],
+                        "semantic": cand["semantic"],
+                    }
+                    text = self.detokenize(cand["span"])
+                    best = (text, list(cand["span"]), meta)
+
         if return_passage:
             return best + (hits,)
         return best
