@@ -62,13 +62,19 @@ contamination transitively.
 
 If you came here expecting GPT-2, you are in the wrong repo.
 
-- Output is phrase-level, not sentence-level. You will recognize
-  English words and short phrases. You will not get coherent answers
-  or multi-sentence paragraphs.
-- Topic drifts every 10–20 tokens. There's no long-range memory.
-- No instruction-following, no dialog, no reasoning. A question gets
-  text that sometimes looks like an answer and usually isn't.
-- Numbers, rare words, proper nouns, and punctuation are weak spots.
+- Output is **sentence-shaped and usually self-terminates** (75-85 %
+  natural-stop rate), but it's still short-range. Don't expect
+  multi-sentence paragraphs.
+- Topic can drift mid-response. No long-range memory, no multi-turn.
+- **Factual accuracy is ~10 %** on SQuAD dev questions with retrieval
+  (up from 0.7 % without). Most answers are still wrong — when
+  retrieval misses, or when the right passage is retrieved but the
+  copy mechanism picks the wrong span, the model confidently makes
+  something up.
+- **Numbers and years now work** (v2 vocab extension), but long-tail
+  proper nouns, foreign words, and special characters are still
+  weak spots (~1.3 % of corpus is still `<unk>`).
+- No instruction-following, no dialog, no reasoning.
 
 ## Install
 
@@ -190,10 +196,12 @@ Q: democracy is a system of
 A: the world in the early days of the war .
 ```
 
-Sentence-shaped, self-terminating, wrong on facts. Wikipedia text-
-shape is what it learned; it has never been given knowledge-retrieval
-machinery. See `CHATBOT_V1_REPORT.md` for the build and honest
-assessment.
+Sentence-shaped, self-terminating, **mostly wrong on facts without
+retrieval**. These samples are from `generate_rerank` (no RAG). The
+pipeline does have retrieval machinery now (see the Factual Q&A
+section above and `RAG_V2_REPORT.md`) — with retrieval enabled the
+answer-containment rate rises from ~0.7 % to ~10 % on SQuAD dev.
+See `CHATBOT_V1_REPORT.md` for the sentence-shape build.
 
 ## Model size
 
@@ -248,11 +256,15 @@ angles in `assets/embedding_3d_front.png` and
 
 Pairwise cosine similarity between the **mean embedding** of each
 semantic category. Diagonal is 1 by construction; brighter off-
-diagonal = two categories are close in embedding space. Note how
-"countries" and "sports" separate cleanly from "numbers" and
-"years" (the v2-added numeric tokens), while "verbs" and "emotions"
-cluster together — all of which came out of purely evolved weights
-against a PPMI-SVD co-occurrence objective, no supervision.
+diagonal = two categories are close in embedding space. "Numbers" has
+the cleanest separation from everything else. "Verbs ↔ emotions"
+(0.63) and "body ↔ verbs" (0.60) pick up real English usage overlap
+(emotional verbs, bodily-action verbs). **"Years"** is noisier because
+those were the v2-added tokens initialized with random Gaussians
+before any evolution touched them — the ~0.5-0.6 cosines to unrelated
+categories are exactly the "this token is randomly placed" artifact
+you'd expect. Left to evolve further they would migrate toward the
+numeric cluster.
 
 Numbers and colors form their own pockets, royalty words sit near
 each other, countries clump on one side. None of this was supervised.
@@ -293,28 +305,35 @@ Chatbot-shape (prompted with questions and definitions):
 < the city of san diego .
 ```
 
-Short, self-terminating, sentence-shaped — and almost always wrong on
-facts. The pipeline learned Wikipedia-style text-shape, not knowledge
-retrieval. Try `--alpha 0` (pure n-gram) to compare.
+Short, self-terminating, sentence-shaped — and without retrieval,
+almost always wrong on facts. The plain pipeline learned Wikipedia
+text-shape, not knowledge retrieval; the RAG layer on top is what
+supplies the facts (see the Factual Q&A section). Try `--alpha 0`
+(pure n-gram) to compare, or `bench_rag.py` for full RAG eval.
 
 ## Known failure modes
 
 - **No FFN between attention and the rerank step.** The attention
   output goes straight to cosine-vs-candidate.
 - **Rerank candidate set is bounded.** K=30 by default. If the true
-  next token isn't proposed by the n-gram cascade (26% of held-out
-  positions), it cannot be picked. Raise with `/topk`.
+  next token isn't proposed by the n-gram cascade, it cannot be
+  picked. The RAG path mitigates this by adding passage tokens to the
+  pool. Raise with `/topk`.
 - **No long-range coherence.** N-gram window is 4 tokens. Attention
   context is 512, but the rerank fitness only scored next-token
   choice, so long-range structure is not under any selection
   pressure.
-- **Word-level tokenizer.** Out-of-vocabulary becomes `<unk>`. No
-  BPE.
-- **Small training eval set.** The rerank fitness is computed on 6
-  sequences (~660 word-target positions). A subsequent L3 layer kept
-  improving that fitness but regressed generation diversity — the
-  eval set is small enough to overfit. L3 was not shipped; the
-  L2-capped 4-layer stack is the release.
+- **Word-level tokenizer (61,641 tokens).** Numbers and years work
+  after the v2 extension, but long-tail proper nouns and foreign
+  words still go to `<unk>` (~1.3 % of the training corpus).
+- **Small rerank eval set.** The rerank fitness is computed on 6-30
+  sequences per stage. Scaling it up is the most likely way to unlock
+  another layer of attention without Goodhart.
+- **Retrieval recall caps RAG accuracy.** Top-1 paragraph retrieval
+  on SQuAD dev is 52 %; even with perfect extraction the ceiling is
+  ~52 % answer containment, and current extraction only converts
+  ~15 % of correct retrievals into correct answers (see
+  `RAG_V2_REPORT.md`).
 
 ## Repository layout
 
