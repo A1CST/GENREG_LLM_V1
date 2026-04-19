@@ -335,16 +335,27 @@ def bench_chatbot_shape(model, seeds=(42, 100), n_tokens=40):
 
 
 def bench_chatbot_samples(model, seeds=(42,), n_tokens=40):
-    """Print a handful of chatbot-shape completions."""
-    print("\n  Chatbot sample generations (alpha=5, temp=0.7):\n")
+    """Print chatbot samples three ways: no retrieval, RAG generation,
+    and extractive QA."""
+    print("\n  Chatbot sample generations — three modes:\n")
+    has_rag = model._rag is not None
     for seed in seeds:
-        torch.manual_seed(seed)
         for p in CHATBOT_PROMPTS[:5]:
-            text, _ = model.generate_rerank(p, max_tokens=n_tokens,
-                                             alpha=5.0, temperature=0.7,
-                                             top_k=30)
+            torch.manual_seed(seed)
+            text_r, _ = model.generate_rerank(p, max_tokens=n_tokens,
+                                                alpha=5.0, temperature=0.7,
+                                                top_k=30)
             print(f"  Q: {p}")
-            print(f"  A: {text}\n")
+            print(f"    [no-RAG]:   {text_r}")
+            if has_rag:
+                torch.manual_seed(seed)
+                text_g, _, _ = model.generate_rag(
+                    p, max_tokens=n_tokens, k=1, alpha=5.0,
+                    temperature=0.7, top_k=30)
+                print(f"    [RAG]:      {text_g}")
+                ext_text, _ = model.generate_qa(p, k_retrieve=3, max_span=8)
+                print(f"    [extract]:  {ext_text}")
+            print()
 
 
 def bench_rag_and_extractive(model, n_questions=150, k=3,

@@ -1,9 +1,10 @@
 # RAG v2 — Vocabulary Extension & Span-Scorer
 
-**Status:** Vocabulary extended, RAG containment doubled over v1. Span-
-scorer evolution attempted but train/test distribution mismatch made
-the learned scorer underperform the heuristic. Reverted to heuristic
-for ship.
+**Status:** Vocabulary extended, RAG containment doubled over v1.
+Chunked retrieval (v3, see addendum at bottom) then lifted extractive
+accuracy above RAG generation. Span-scorer evolution attempted but
+train/test distribution mismatch made the learned scorer underperform
+the heuristic. Reverted to heuristic for ship.
 
 ## Final numbers (300 SQuAD dev questions, k=3)
 
@@ -209,3 +210,74 @@ Gradient-free guarantee holds: BM25 is counting, SIF is closed-form
 linear algebra over counted + evolved-embedding data, vocab extension
 is counting + random init, span-scorer evolution is tournament
 selection.
+
+---
+
+## Addendum — v3 chunked retrieval
+
+After v2 shipped (RAG generation 7.3 % answer containment, extractive
+6.0 %), the retrieval ceiling was the bottleneck. Recall@1 was 51 %
+and the BM25 lexical signal was being diluted by whole-paragraph
+token counts on paragraphs that averaged 117 content tokens.
+
+**Fix: chunk paragraphs into 80-token windows with 20-token overlap.**
+20,958 SQuAD paragraphs → 46,586 chunks. BM25 and dense SIF scoring
+now operate at the chunk level; retrieval returns the best chunk per
+parent paragraph, deduplicated to top-K parents.
+
+**Storage:** chunk embeddings stored as int8-quantized vectors with a
+single scale factor (x / 127 ≈ original unit-normed values). This
+brings `rag_index.pkl` from 173 MB → 89 MB, under GitHub's 100 MB
+file-size hard limit.
+
+**Span search** moved to chunk scope — the extract_answer routine
+searches spans within the matched chunk, not the full parent, which
+is about 2× more focused.
+
+### v3 results (300 SQuAD dev questions, k=3, seed 7)
+
+| metric | v2 (paragraph) | **v3 (chunked)** | lift |
+|---|---|---|---|
+| retrieval recall@1 | 0.513 | **0.523** | +1.0 pp |
+| retrieval recall@3 | 0.650 | **0.673** | +2.3 pp |
+| answer containment — extractive | 0.060 | **0.077** | +1.7 pp |
+| answer containment — RAG generation | 0.073 | 0.050 | −2.3 pp |
+| F1 — extractive | 0.061 | **0.072** | +0.011 |
+| F1 — RAG generation | 0.048 | 0.050 | +0.002 |
+
+Chunking cleanly helps retrieval and extraction. RAG generation
+regresses slightly because the generation copy pool benefits from
+having more diverse passage tokens (full paragraph) rather than a
+smaller chunk.
+
+**Extractive is now the winning QA path** — 7.7 % vs RAG's 5.0 %.
+This flip matters because extractive is deterministic (no sampling
+noise), faster (no per-token attention forward), and cheaper to
+inspect (you can see exactly which span was chosen). The final
+pipeline ships extractive as the recommended factual-QA mode and
+RAG generation as a secondary option for prompts where span-matching
+doesn't apply.
+
+### What else was tried (and left off)
+
+- **Smaller chunks (60-token, 30-overlap)** produced 74,292 chunks.
+  The float16 embedding matrix alone hit 109 MB, over GitHub's file
+  limit even after int8 quant (64 MB for embeddings plus ~70 MB of
+  token lists and texts put the pickle over 120 MB). 80/20 chunking
+  was the sweet spot for storage vs concentration.
+- **Chunk-tokens-only copy pool for generation** hurt RAG
+  containment (3.3 %) more than full-parent (5.0 %). Generation
+  prefers broader candidate coverage.
+- **Geometric-mean passage base probability** reduced repetition in
+  RAG output ("saxophones saxophones orchestration"-style) but also
+  dropped RAG containment to 3.3 %. Reverted to max-n-gram base;
+  extractive is the more reliable path anyway.
+
+### Files changed (v3)
+
+- `checkpoints/rag_index.pkl` — rebuilt as chunked_v1 format with
+  46,586 chunks, int8 embeddings, chunk_parent map, chunk_token_lists
+- `lib/model.py` — retrieve() supports both chunked_v1 and legacy
+  paragraph formats; extract_answer() searches chunk scope when
+  available
+- `LLM/data_raw/build_rag_chunked.py` — chunked index builder

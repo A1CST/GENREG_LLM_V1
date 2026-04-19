@@ -1,5 +1,9 @@
 # GENREG LM
 
+**Version: 2026-04-18 v3-chunked-rag** — retrieval recall@1 53.3 %,
+extractive answer-containment 8.3 % on SQuAD v1.1 dev (300-q sample,
+seed 7). See `CHANGELOG.md` for per-version deltas.
+
 A chatbot-shaped language model trained **without gradient descent,
 without backpropagation, and without closed-form regression** against
 supervised targets. Every learned parameter was produced by
@@ -8,11 +12,10 @@ counted directly from the corpus.
 
 Still a research artifact. **Output is now sentence-shaped and
 terminates naturally 75 – 85 % of the time**. With retrieval enabled
-(see `RAG_V2_REPORT.md`), factual accuracy is **~7.3 % on SQuAD dev**
-(up from 0.3 % baseline — **24× lift**) after vocabulary extension
-and extractive answer spans. See `CHATBOT_V1_REPORT.md`,
-`RAG_V1_REPORT.md`, and `RAG_V2_REPORT.md` for the full build path
-and honest numbers.
+and chunked extractive QA, factual accuracy is **~7.7 % on SQuAD dev**
+(up from 0.3 % no-RAG baseline — **25× lift**). See
+`CHATBOT_V1_REPORT.md`, `RAG_V1_REPORT.md`, and `RAG_V2_REPORT.md`
+for the full build path and honest numbers.
 
 ## The no-gradient claim, precisely
 
@@ -66,11 +69,11 @@ If you came here expecting GPT-2, you are in the wrong repo.
   natural-stop rate), but it's still short-range. Don't expect
   multi-sentence paragraphs.
 - Topic can drift mid-response. No long-range memory, no multi-turn.
-- **Factual accuracy is ~10 %** on SQuAD dev questions with retrieval
-  (up from 0.7 % without). Most answers are still wrong — when
-  retrieval misses, or when the right passage is retrieved but the
-  copy mechanism picks the wrong span, the model confidently makes
-  something up.
+- **Factual accuracy is ~8.3 %** on SQuAD dev via the extractive
+  path (up from 0.3 % without retrieval — **28× lift**). Most answers
+  are still wrong. Conditional extraction rate is ~11 % (when the
+  correct passage IS retrieved, we still only pick the right span
+  11 % of the time). The span scorer is the biggest remaining gap.
 - **Numbers and years now work** (v2 vocab extension), but long-tail
   proper nouns, foreign words, and special characters are still
   weak spots (~1.3 % of corpus is still `<unk>`).
@@ -138,22 +141,31 @@ from a less-pruned source.
 
 ## Factual Q&A (RAG on SQuAD dev)
 
-150 SQuAD v1.1 dev questions sampled with seed 7, top-k=3 retrieval:
+300 SQuAD v1.1 dev questions sampled with seed 7, top-k=3 retrieval,
+chunked retrieval index (46,586 chunks × 80 content tokens), tuned
+BM25 (k1=1.2, b=0.5, blend=0.85):
 
 | metric | value |
 |---|---|
-| retrieval recall@1 | **52.0 %** |
-| retrieval recall@3 | **61.3 %** |
-| answer containment — no retrieval | 0.7 % |
-| answer containment — **RAG generation** | **10.0 %** |
-| answer containment — extractive QA | 6.7 % |
+| retrieval recall@1 | **53.3 %** |
+| retrieval recall@3 | **68.3 %** |
+| retrieval recall@10 | 78.0 % |
+| answer containment — no retrieval | 0.3 % |
+| answer containment — **extractive QA** | **8.3 %** |
+| answer containment — RAG generation | 5.7 % |
+| extractive F1 | 0.075 |
+| conditional extraction (given recall@1 hit) | ~10.7 % |
 
-**~14× lift from retrieval** on answer containment (0.7 % → 10 %).
-Retrieval is hybrid BM25 + SIF-weighted cosine on a 20,958-paragraph
-index extracted from SQuAD train + dev Wikipedia passages.
-Generation augments the candidate pool with inverse-document-
-frequency-weighted passage tokens so entity names can leak into the
-response when attention picks them.
+**~28× lift from retrieval** on answer containment (0.3 % → 8.3 %).
+Retrieval is hybrid BM25 + SIF-weighted cosine on 46,586 paragraph
+chunks extracted from SQuAD train + dev Wikipedia passages
+(paragraphs are split into 80-token windows with 20-token overlap,
+which concentrates lexical match signal on the answer neighborhood).
+
+Chunk embeddings are stored int8-quantized to fit under GitHub's file
+size limit. Extraction searches for the best span inside the matched
+chunk; generation augments the candidate pool with inverse-document-
+frequency-weighted tokens from the whole parent paragraph.
 
 See `RAG_V1_REPORT.md` and `RAG_V2_REPORT.md` for ablations and the
 full build path.

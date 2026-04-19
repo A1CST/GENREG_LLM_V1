@@ -212,14 +212,27 @@ class GenregLM:
         self.fourgram = _load_ngram("fourgram")
         self.fivegram = _load_ngram("fivegram")
 
-        # RAG paragraph index (optional — only loaded if present)
+        # RAG index (optional — supports both chunked_v1 and legacy
+        # paragraph-level formats)
         self._rag = None
+        self._rag_chunked = False
         rag_path = os.path.join(ckpt_dir, "rag_index.pkl")
         if os.path.exists(rag_path):
             with open(rag_path, "rb") as f:
                 self._rag = pickle.load(f)
-            self._rag_emb = torch.from_numpy(
-                self._rag["embeddings"].astype(np.float32)).to(self.device)
+            self._rag_chunked = self._rag.get("format") == "chunked_v1"
+            emb_key = "chunk_embeddings" if self._rag_chunked else "embeddings"
+            raw_emb = self._rag[emb_key]
+            # int8-quantized? dequantize on load
+            if raw_emb.dtype == np.int8:
+                scale = self._rag.get("chunk_embeddings_scale", 127.0)
+                emb_f32 = raw_emb.astype(np.float32) / float(scale)
+                # re-normalize to unit length after dequant
+                norms = np.linalg.norm(emb_f32, axis=1, keepdims=True)
+                emb_f32 = emb_f32 / np.maximum(norms, 1e-8)
+            else:
+                emb_f32 = raw_emb.astype(np.float32)
+            self._rag_emb = torch.from_numpy(emb_f32).to(self.device)
             self._sif_mean = torch.from_numpy(
                 self._rag["sif_mean"]).to(self.device)
             self._sif_top_pc = torch.from_numpy(
@@ -316,7 +329,9 @@ class GenregLM:
     # ----- Retrieval (RAG) --------------------------------------------
 
     @torch.no_grad()
-    def retrieve(self, query, k=3, bm25_weight=0.7):
+    def retrieve(self, query, k=3, bm25_weight=0.85, bm25_k1=1.2, bm25_b=0.5,
+                  prf=False, prf_top=3, prf_terms=6,
+                  qexp=True, qexp_k=3, qexp_weight=0.4):
         """Return top-K paragraphs for a query, ranked by a hybrid of
         BM25 lexical match and SIF-weighted cosine similarity on the
         evolved embeddings.
@@ -348,7 +363,7 @@ class GenregLM:
 
         # ---- BM25 lexical score ----
         import math as _math
-        k1 = 1.2; b = 0.75
+        k1 = bm25_k1; b = bm25_b
         STRUCTURAL = {66, 67}
         ALLOWED_PUNCT = self._ALLOWED_PUNCT_IDS
         q_content = set()
@@ -361,8 +376,12 @@ class GenregLM:
         N_docs = self._rag["N_docs"]
         avgdl = self._rag["avgdl"]
         token_df = self._rag["token_df"]
-        para_tf = self._rag["para_tf"]
-        para_len = self._rag["para_len"]  # np.int32 array
+        if self._rag_chunked:
+            tf_list = self._rag["chunk_tf"]
+            len_arr = self._rag["chunk_len"]
+        else:
+            tf_list = self._rag.get("para_tf", [])
+            len_arr = self._rag.get("para_len", [])
 
         # Per-token idf
         idf = {}
@@ -372,9 +391,48 @@ class GenregLM:
                 continue
             idf[t] = _math.log((N_docs - df + 0.5) / (df + 0.5) + 1.0)
 
-        bm25 = np.zeros(len(para_tf), dtype=np.float32)
-        for i, tf_dict in enumerate(para_tf):
-            dl = float(para_len[i])
+        # ---- Query expansion via embedding neighbors ----
+        # For rare content tokens in the query, find the k nearest
+        # neighbors in the evolved embedding space and add them to the
+        # BM25 query with reduced idf weight. Handles paraphrase
+        # (automobile ↔ car, film ↔ movie) without any training.
+        if qexp and q_content:
+            rare_q = [t for t in q_content
+                       if float(self._tok_weight[t].item()) > 0.3]
+            if rare_q:
+                q_vecs = emb_n[torch.tensor(rare_q, device=self.device)]
+                # Cosine to all embeddings
+                sims = q_vecs @ emb_n.t()     # (n_rare, V)
+                # Mask already-in-query tokens + <unk>/specials
+                in_q = torch.zeros(self.V, dtype=torch.bool,
+                                    device=self.device)
+                for t in q_content:
+                    in_q[t] = True
+                in_q[1] = True   # <unk>
+                sims[:, in_q] = -1.0
+                # Top-k per query token
+                vals, top_ids = sims.topk(qexp_k, dim=1)
+                for row in range(vals.shape[0]):
+                    for j in range(qexp_k):
+                        nb = int(top_ids[row, j].item())
+                        sim_val = float(vals[row, j].item())
+                        if sim_val < 0.3:
+                            continue
+                        if nb in idf:
+                            continue
+                        # Only expand with content tokens
+                        if nb < CHAR_CUTOFF and nb not in self._ALLOWED_PUNCT_IDS:
+                            continue
+                        df = token_df.get(nb, 0)
+                        if df == 0:
+                            continue
+                        base_idf = _math.log(
+                            (N_docs - df + 0.5) / (df + 0.5) + 1.0)
+                        idf[nb] = base_idf * qexp_weight * sim_val
+
+        bm25 = np.zeros(len(tf_list), dtype=np.float32)
+        for i, tf_dict in enumerate(tf_list):
+            dl = float(len_arr[i])
             norm = 1 - b + b * dl / max(avgdl, 1e-6)
             s = 0.0
             for t, id_val in idf.items():
@@ -388,6 +446,78 @@ class GenregLM:
             bm25_t = (bm25_t - bm25_t.mean()) / (bm25_t.std() + 1e-8)
 
         scores = bm25_weight * bm25_t + (1 - bm25_weight) * dense_scores
+
+        # Pseudo-relevance feedback: take top-prf_top chunks, extract
+        # the top prf_terms rarest content tokens (excluding query
+        # tokens), add them to the BM25 query with half-weight idf, and
+        # rescore. Classical IR trick — concentrates on entity-like
+        # tokens that appear near the query match.
+        if prf:
+            top_ci = scores.topk(prf_top).indices.cpu().tolist()
+            exp_counts = {}
+            for ci in top_ci:
+                tf = tf_list[ci]
+                for t, cnt in tf.items():
+                    if t in q_content:
+                        continue
+                    # content token with meaningful SIF weight
+                    if float(self._tok_weight[t].item()) < 0.3:
+                        continue
+                    exp_counts[t] = exp_counts.get(t, 0) + cnt
+            # Rank by inverse DF × total count (rare + salient)
+            ranked = []
+            for t, c in exp_counts.items():
+                df = token_df.get(t, 1)
+                idf_t = _math.log((N_docs - df + 0.5) / (df + 0.5) + 1.0)
+                ranked.append((t, idf_t * c, idf_t))
+            ranked.sort(key=lambda x: -x[1])
+            exp_terms = ranked[:prf_terms]
+            if exp_terms:
+                bm25_exp = np.zeros(len(tf_list), dtype=np.float32)
+                for i, tf_dict in enumerate(tf_list):
+                    dl = float(len_arr[i])
+                    norm = 1 - b + b * dl / max(avgdl, 1e-6)
+                    s = 0.0
+                    for t, _score, id_val in exp_terms:
+                        f = tf_dict.get(t, 0)
+                        if f == 0: continue
+                        s += id_val * (f * (k1 + 1)) / (f + k1 * norm)
+                    bm25_exp[i] = s
+                bm25_exp_t = torch.from_numpy(bm25_exp).to(self.device)
+                if bm25_exp_t.std() > 0:
+                    bm25_exp_t = (bm25_exp_t - bm25_exp_t.mean()) / (
+                        bm25_exp_t.std() + 1e-8)
+                # Blend expansion score at 0.4 weight
+                scores = scores + 0.4 * bm25_exp_t
+
+        # Chunked retrieval: dedupe chunks by parent paragraph, keep
+        # the best chunk per parent, then return the PARENT as the hit.
+        if self._rag_chunked:
+            parent_ids = self._rag["chunk_parent"]
+            # For each parent, keep max-score chunk index
+            best_per_parent = {}
+            # Get top 4k chunks first to save compute
+            topk_raw = scores.topk(min(4 * k + 20, scores.shape[0]))
+            for ci, s in zip(topk_raw.indices.cpu().tolist(),
+                              topk_raw.values.cpu().tolist()):
+                p = int(parent_ids[ci])
+                if p not in best_per_parent or s > best_per_parent[p][1]:
+                    best_per_parent[p] = (ci, s)
+            ranked = sorted(best_per_parent.values(),
+                             key=lambda x: -x[1])[:k]
+            out = []
+            for ci, s in ranked:
+                p = int(parent_ids[ci])
+                out.append({
+                    "text": self._rag["texts"][p],
+                    "title": self._rag["titles"][p],
+                    "token_ids": self._rag["token_lists"][p],
+                    "chunk_token_ids": self._rag["chunk_token_lists"][ci],
+                    "chunk_idx": ci,
+                    "score": s,
+                })
+            return out
+        # Legacy paragraph-level
         top = scores.topk(min(k, scores.shape[0]))
         out = []
         for idx, s in zip(top.indices.cpu().tolist(),
@@ -480,11 +610,27 @@ class GenregLM:
         qtype = self._classify_question(query)
         tok_weight_np = self._tok_weight.cpu().numpy()
 
+        # Precompute globals for v2 span scorer features
+        token_df_dict = self._rag["token_df"] if self._rag else {}
+        N_docs_val = self._rag["N_docs"] if self._rag else 1
+
+        # Normalize retrieval scores across hits to [0,1]
+        import math as _math
+        scores_arr = np.array([h.get("score", 1.0) for h in hits],
+                               dtype=np.float32)
+        if scores_arr.size and scores_arr.max() > scores_arr.min():
+            retr_score_by_h = (scores_arr - scores_arr.min()) / (
+                scores_arr.max() - scores_arr.min() + 1e-8)
+        else:
+            retr_score_by_h = np.ones(scores_arr.size, dtype=np.float32)
+
         best_score = -1e9
         best = ("", [], {})
 
         for h_idx, h in enumerate(hits):
-            passage = h["token_ids"]
+            # For chunked retrieval, search spans within the matched
+            # chunk (much more focused than the full parent).
+            passage = h.get("chunk_token_ids") or h["token_ids"]
             hit_positions = [i for i, t in enumerate(passage)
                               if t in q_content_rare]
             if not hit_positions:
@@ -507,61 +653,64 @@ class GenregLM:
                     if any(t == 1 for t in span):
                         continue
 
-                    # Compute features matching the span-scorer trainer
                     L_ = L
-                    prox = 1.0 / (1.0 + dists[start])
-                    rarity = float(sum(tok_weight_np[t] for t in span))
-                    length = float(L_)
+                    # v2 span scorer expects passage-agnostic features.
+                    # Compute them in the same order as
+                    # FEATURE_NAMES in genreg_span_scorer_v2.py.
+                    rarity_sum = float(sum(tok_weight_np[t] for t in span))
+                    rarity_max = float(max(tok_weight_np[t] for t in span))
+                    length_f = float(L_)
                     semantic = 0.0
-                    inv_u = 0.0
                     if q_vec is not None:
                         s_tens = torch.tensor(span, device=self.device)
                         s_w = self._tok_weight[s_tens].unsqueeze(1)
                         s_vec = (emb_n[s_tens] * s_w).sum(dim=0) / (s_w.sum() + 1e-8)
                         s_vec = F.normalize(s_vec.unsqueeze(0), dim=1).squeeze(0)
-                        sim = float((s_vec * q_vec).sum().item())
-                        semantic = sim
-                        inv_u = -(abs(sim - 0.5) ** 2) + 0.25
+                        semantic = float((s_vec * q_vec).sum().item())
+                    inv_u = -(abs(semantic - 0.5) ** 2) + 0.25
                     numeric = 1.0 if self._span_is_numeric(span) else 0.0
                     is_when = 1.0 if qtype in ("when", "year", "num") else 0.0
                     is_who = 1.0 if qtype in ("who", "whom") else 0.0
                     is_where = 1.0 if qtype == "where" else 0.0
                     is_what = 1.0 if qtype in ("what", "which") else 0.0
-                    first_rare = float(tok_weight_np[span[0]]) if span else 0.0
-                    # mean/max distance to query hits across span positions
-                    if hit_positions:
-                        mean_d = sum(
-                            min(abs(start + i - p) for p in hit_positions)
-                            for i in range(L_)) / L_
-                        max_d = max(
-                            min(abs(start + i - p) for p in hit_positions)
-                            for i in range(L_))
-                    else:
-                        mean_d = 999.0; max_d = 999.0
-                    mean_dist_score = 1.0 / (1.0 + mean_d)
-                    max_dist_score = 1.0 / (1.0 + max_d)
-                    overlap = float(sum(1 for t in span if t in q_content))
-                    retr_conf = 1.0 / (1.0 + h_idx)
+                    first_rare = float(tok_weight_np[span[0]])
+                    last_rare = float(tok_weight_np[span[-1]])
+                    # BM25-style match of span tokens against query IDF
+                    bm25_span_q = 0.0
+                    for t in span:
+                        if t in q_content:
+                            df = token_df_dict.get(t, 0)
+                            if df > 0:
+                                bm25_span_q += _math.log(
+                                    (N_docs_val - df + 0.5) / (df + 0.5) + 1.0)
+                    bm25_span_q /= max(L_, 1)
 
-                    feat_vec = [prox, rarity, length, semantic, inv_u,
-                                 numeric, is_when, is_who, is_where,
-                                 is_what, first_rare, mean_dist_score,
-                                 max_dist_score, overlap, retr_conf]
+                    # v2 feature order (13 — retr_score dropped):
+                    # bm25_span_q, rarity_sum, rarity_max, length,
+                    # semantic_cos, inv_u_sem, numeric,
+                    # is_when, is_who, is_where, is_what,
+                    # first_rare, last_rare
+                    feat_vec = [bm25_span_q, rarity_sum, rarity_max,
+                                 length_f, semantic, inv_u, numeric,
+                                 is_when, is_who, is_where, is_what,
+                                 first_rare, last_rare]
+                    retr_score = float(retr_score_by_h[h_idx])
 
-                    if self._span_scorer is not None:
+                    if (self._span_scorer is not None
+                            and self._span_scorer.get("version") == "v2_cross_passage"):
                         ft = torch.tensor(feat_vec, device=self.device,
                                            dtype=torch.float32)
                         score = float((ft * self._span_scorer_w).sum().item()
                                        + self._span_scorer_b)
                     else:
-                        # Fallback heuristic
+                        # Fallback heuristic (passage-relative features)
                         qtype_bonus = 0.0
                         if is_when and numeric:
                             qtype_bonus = 3.0
                         elif is_when:
                             qtype_bonus = -0.8
-                        score = (prox * 2.0 + rarity + qtype_bonus
-                                  + inv_u + retr_conf * 0.5
+                        score = (rarity_sum + qtype_bonus + inv_u
+                                  + (1.0 / (1.0 + h_idx)) * 0.5
                                   - 0.05 * max(0, L_ - 5))
                     if score > best_score:
                         best_score = score
@@ -572,9 +721,9 @@ class GenregLM:
                             "span_len": L,
                             "score": score,
                             "qtype": qtype,
-                            "prox": prox,
-                            "rarity": rarity,
+                            "rarity_sum": rarity_sum,
                             "semantic": semantic,
+                            "retr_score": retr_score,
                         }
                         text = self.detokenize(span)
                         best = (text, list(span), meta)
@@ -638,14 +787,20 @@ class GenregLM:
         tok_weight_np = self._tok_weight.cpu().numpy() if hasattr(
             self, "_tok_weight") else None
         for h in hits:
+            # Use the full parent paragraph as copy source — more
+            # coverage than the single chunk. Chunk tokens get an
+            # extra SIF-weight boost below since they matched the
+            # retrieval signal directly.
+            chunk_set = set(h.get("chunk_token_ids") or [])
             for t in h["token_ids"]:
                 if (t >= CHAR_CUTOFF or t in self._ALLOWED_PUNCT_IDS) \
                         and t not in (66, 67):
                     w = float(tok_weight_np[t]) if tok_weight_np is not None else 1.0
-                    # Cap very common passage tokens (df-weight < 0.5)
-                    # at zero to keep the copy pool focused
                     if w < 0.2:
                         continue
+                    # Boost tokens that are in the matched chunk
+                    if t in chunk_set:
+                        w = min(1.0, w * 1.5)
                     passage_weighted[t] = max(passage_weighted.get(t, 0.0), w)
         for _ in range(max_tokens):
             if tok.shape[0] > MAX_LEN:
@@ -657,8 +812,9 @@ class GenregLM:
                     cands = [(next(iter(self.bigram[ids_list[-1]])), 0.5)]
                 else:
                     break
-            # Augment with rare passage tokens, weighted by inverse
-            # document frequency so entity-like tokens dominate.
+            # Augment with rare passage tokens at the max n-gram prob
+            # so attention cosine directly picks between "continue per
+            # grammar" vs "copy from passage."
             existing = set(c[0] for c in cands)
             if cands:
                 passage_base = max(c[1] for c in cands)
@@ -666,7 +822,6 @@ class GenregLM:
                 passage_base = 0.2
             for t, w in passage_weighted.items():
                 if t not in existing:
-                    # Rarer tokens (higher SIF weight) get boosted
                     cands.append((t, passage_base * w))
             positions = torch.arange(tok.shape[0], device=self.device)
             x = frozen_forward(self.embed, self.posenc, tok, positions)
