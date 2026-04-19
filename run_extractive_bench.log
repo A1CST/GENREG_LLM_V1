@@ -1,0 +1,106 @@
+
+Q: What does the acronym FIS stand for?
+  gold: 'Front Islamique de Salut'
+  no-RAG: 'up for love , but the new york times on the east coast of the united states in the colorado basin of the columbia river , its first week .'
+  RAG:    '1944 and grandstand was not the stand attracting 1922 camp grandstand surpassed the revenue deal with the grandstand stand of 1950 to 2000 and lending the grandstand 1946 1944 1944'
+  EXTR:   'after the last expansion , les could hold .'
+
+Q: What was done to the Trajan's Column replica to fit it under the ceiling?
+  gold: 'cut in half'
+  no-RAG: 'name of the new york times book review column in the non harming the first four games of the 2000 census , the population of the new york times ,'
+  RAG:    'tombs rooms tombs of tombs column friezes on comprising ceiling replica of wing storeys plaster reproductions of replicas comprising davids sculptures tombs fit the psp sculptures casts reproductions reproductions of'
+  EXTR:   'architecture , including replica of david . replicas .'
+
+Q: What is the name of the current refurbishment the system is undergoing?
+  gold: "Metro: All Change.'"
+  no-RAG: 'the third studio album by american recording artist britney spears , barbadian folk music of the series , and in the top ten on most of the remaining japanese in'
+  RAG:    '1567 to hernando pardo and diseases such devastating the expeditions of vacuum tubes were tristan tennessee on hernando cherokee pardo and choctaw county choctaw inhabited diseases and namely the abilities'
+  EXTR:   'undergoing period of refurbishment and modernization , entitled .'
+
+Q: What was one of Tesla's books where articles can be read?
+  gold: 'Inventions, Researches and Writings of Nikola Tesla.'
+  no-RAG: 'used to determine whether that year .'
+  RAG:    'used hatcher 2002 to 2010 compiled articles childress compiled in articles hatcher edited the tesla journals fantastic and journals inventions childress racing autobiography journals compiled papers which johnston edited to'
+  EXTR:   'books are my inventions the autobiography of nikola .'
+
+Q: How many invertebrate species are known in Brazil alone? 
+  gold: '96,660 and 128,843'
+  no-RAG: ', the new york state route 9a designation at the time of the broadcast .'
+  RAG:    ', the new fishes amazon on the 428 427 reptiles 2,200'
+  EXTR:   'over 10,000 invertebrate species , including 180 mollusks .'
+
+Q: What did Josel of Rosheim claimed that Luther said of those who might aid the Jews?
+  gold: 'doomed to perdition'
+  no-RAG: 'advance was made to the original game and the series as well as its main armament .'
+  RAG:    "grant and punishments for salvation army of salvation punishments on error of grant punishments false absolved absolved error in buyers god's"
+  EXTR:   ''
+
+Q: Who received the pass that was ruled incomplete and confirmed after a challenge?
+  gold: 'Jerricho Cotchery'
+  no-RAG: 'the storm , the national hurricane center did not have the authority of the president of the united states , the album debuted at number 20 on the billboard 200'
+  RAG:    'cam analyst sacking punted cam bowl challenge the disagreed with analyst upheld panthers felt broncos from analyst for knocked retired sacking the first quarterback malik quarterback upheld carey fumble replay'
+  EXTR:   ''
+
+Q: What building is the most interesting of the late 19th-century architecture?
+  gold: 'Warsaw University of Technology building'
+  no-RAG: 'no one is going to stop the war .'
+  RAG:    'saxon chronicle interesting rebuilt the insurance bourgeois edifice prewar composition 19th-century'
+  EXTR:   'tallest building in ann arbor . the 19th-century .'
+
+Q: Who are debates and meetings open to?
+  gold: 'the public'
+  no-RAG: 'and the other at the front in the united states .'
+  RAG:    'thursdays debates tuesdays verbatim booking decision thursdays plenary wednesdays thursdays on the booking mid wednesday booking of the sits tuesdays recesses proceedings of debating sits verbatim wednesday morning of transcript'
+  EXTR:   'recesses in april and october . plenary meetings .'
+
+Q: What is considered as a potential advantage for wealth for some Americans?
+  gold: 'Inherited wealth'
+  no-RAG: 'of the most successful in the united states .'
+  RAG:    'marginal necessities standpoint marginal happiness millionaire by utilitarian function marginal problematic standpoint of aggregate becomes inequality standpoint healthcare system equality necessities noting problematic in sum sum of seeking to thwart'
+  EXTR:   ''
+
+Q: The Social Chapter is a chapter of what treaty?
+  gold: '1997 Treaty of Amsterdam'
+  no-RAG: 'is now ny 31 continues east until the end of the war .'
+  RAG:    'is remuneration partners in vocational charter strasbourg namely remuneration elderly covering the withdrawal improvements chapter amsterdam enterprises and employers toned declares that confederation disabled namely the arsacid chapter of improvements'
+  EXTR:   'strasbourg european council . the social charter declares .'
+
+Q: Against what country was Kennedy promising superiority over?
+  gold: 'Soviet Union'
+  no-RAG: 'of the new york times called the film at the time .'
+  RAG:    'pledging to webb and booster and promised the first inaction details manned acceleration administrator pledging soviets defeated the knew the subject budget aerospace senators booster for the first booster in'
+  EXTR:   'rocket technology and personnel . the technological superiority .'
+
+Q: What must the integer m be less than or equal to when performing trial division?
+  gold: 'less than or equal to the square root of n'
+  no-RAG: 'of the conspirators and all other islands south to the new zealand and australian division , the u.s .'
+  RAG:    'integer checked at all dividing divides primality primality composite check checked by the checking checking checking and dividing line of the oslo tramway from the album routine integer multiple dividing'
+  EXTR:   'been verified for all numbers up to 1017 .'
+
+Q: Where did American troops remain stationed after Saddam's defeat?
+  gold: 'in the kingdom'
+  no-RAG: 'the war , he was transferred to the mediterranean fleet in 1935 .'
+  RAG:    'the stationed unpopularity with tonkin and 1965 viet sizable cong deploy tactical frustrating the first guerrilla forces in drafted unpopularity deploy the counter stationed battlefield frustrating the counter reaches restrictions'
+  EXTR:   'eisenhower threatened china with nuclear weapons an armistice .'
+
+Q: In what book did Betty Meggers describe the idea of the Amazon being sparsely populated?
+  gold: 'Amazonia: Man and Culture in a Counterfeit Paradise'
+  no-RAG: 'represented the best of the season for the team , but did not pass the law against the ottoman empire and the other way around the town of lydford castle'
+  RAG:    '1500 counterfeit betty fallen proponent 0.2'
+  EXTR:   'trio tribe , who live in the rainforests .'
+
+============================================================
+EXTRACTIVE BENCHMARK (300 questions, k=3)
+============================================================
+  retrieval recall@1:   0.530
+  retrieval recall@3:   0.680
+
+  answer containment:
+    no-RAG generation:   0.003
+    RAG generation:      0.060
+    EXTRACTIVE:          0.090
+
+  token-F1 (mean):
+    no-RAG generation:   0.027
+    RAG generation:      0.051
+    EXTRACTIVE:          0.069

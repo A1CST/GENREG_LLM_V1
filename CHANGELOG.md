@@ -5,10 +5,26 @@ or AI) can tell at a glance what state the repo is in. Each version
 block includes the headline accuracy number and the honest limitation
 that defines the next move.
 
-## v5-mlp-span-scorer (2026-04-19, current)
+## v6-mlp-span-scorer-bigdata (2026-04-19, current)
 
 **Headline:** retrieval recall@1 = 53.3 %, **extractive answer
-containment = 8.7 %** (+1.0 pp over heuristic-only v4), RAG
+containment = 9.0 %** (+1.3 pp over heuristic-only v4, +0.3 pp over
+v5), RAG generation = 6.0 % (SQuAD v1.1 dev, 300-q sample, seed 7).
+
+**What's new:** MLP span scorer retrained on 9.6K training QA pairs
+(v5 used 2.4K). 1,894 effective train + 446 val examples after
+top-100 heuristic filter. val top-1 = 29.6% (heuristic baseline
+17.3%, +12.3 pp val lift). β = -1.05 ensemble weight.
+
+Progression:
+- Heuristic only (v4):   7.7 % extractive
+- MLP 2.4K QA, top-50:   8.7 %  (v5)
+- MLP 9.6K QA, top-100:  **9.0 %** (v6 — current)
+
+## v5-mlp-span-scorer (2026-04-19)
+
+**Headline:** retrieval recall@1 = 53.3 %, extractive answer
+containment = 8.7 % (+1.0 pp over heuristic-only v4), RAG
 generation = 6.0 % (SQuAD v1.1 dev, 300-q sample, seed 7, k=3).
 
 **First learned span-scorer that actually improves dev performance
