@@ -251,7 +251,7 @@ class GenregLM:
             self._span_scorer_b = float(sp["b"])
             self._span_scorer = sp
 
-        # Evolved query-adaptive retrieval reranker
+        # Evolved query-adaptive retrieval reranker (v1)
         self._reranker = None
         rr_path = os.path.join(ckpt_dir, "retrieval_reranker.pkl")
         if os.path.exists(rr_path):

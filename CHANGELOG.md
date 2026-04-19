@@ -5,7 +5,67 @@ or AI) can tell at a glance what state the repo is in. Each version
 block includes the headline accuracy number and the honest limitation
 that defines the next move.
 
-## v8-mlp-span-scorer-deeper-evolution (2026-04-19, current)
+## v9-retrieval-audit-and-cleanup (2026-04-19, current)
+
+**Headline:** explicitly re-scoped away from the span-scorer arms race
+after the retrieval substrate was found to be saturated. Repo pruned
+to the inference + benchmark essentials; exploration artifacts moved
+to `archive/`.
+
+**Retrieval diagnostic (`diag_retrieval.py` on 300 SQuAD dev Q, now
+archived):**
+- recall@1 = 0.530, recall@10 = 0.773, recall@50 = 0.860
+- 24.3 % of queries have gold in top-10 but miss at top-1
+  (rerank-recoverable)
+- 14.0 % of queries don't have gold even in top-50
+  (candidate-generation bound)
+- "when" questions: r@1 = 0.21 (worst slice)
+- queries with 0 rare content tokens: r@1 = 0.31, miss 32 %
+  (25 % of the data)
+
+**Cheap-knob sweep:** bm25_weight, qexp weight/k, PRF, and toggling
+the existing `retrieval_reranker.pkl` — all moved r@1 by ≤0.01. No
+free parameters to tune.
+
+**`retrieval_reranker_v2` (gradient-free MLP over 10 expanded signals
++ 10 query features, 353 params, 800 gens on 1800 SQuAD-train Q):**
+val_top1 plateaued at 0.644, below the 0.66 "keep original order"
+baseline on the filtered pool. Deployed benchmark: r@1 0.530 → 0.537,
+r@10 0.773 → 0.780 — noise-level, effectively a no-op. Checkpoint
+NOT shipped.
+
+**Diagnosis — why the reranker didn't help:**
+- Eight of the ten signals (BM25, SIF-cos, bigram-BM25, length,
+  numeric, title-overlap, content-fraction, first-anchor) are
+  derivatives of lexical+dense overlap. They are highly correlated
+  with each other and with the original blend; combining them via
+  MLP adds little information.
+- The rank-preserve signal (1/(1+initial_rank)) gave the evolution a
+  trivial local optimum at "trust the blend." Population converged
+  there.
+- The 24.3 % "gold in top-10 but miss @1" headroom is not cheap — it
+  exists precisely because lexical+dense are semantically ambiguous
+  on those queries. More combinations of the same two signal families
+  can't resolve genuine ambiguity.
+
+**Next-move options (not attempted yet):**
+- Cross-encoder: run the evolved attention stack on
+  `[query || chunk]` concatenated tokens and cosine the output.
+  Uses semantic reasoning, not lexical overlap. Expensive inference
+  but fundamentally different information.
+- Better query encoding for 0-rare-token queries (25 % of data).
+  Current SIF-mean representation collapses on common-only queries.
+- Accept r@1 ≈ 0.55 and focus downstream: robust RAG generation on
+  top-3 (r@3 = 0.68, so gold is present in 68 % of contexts).
+
+**Repo cleanup:** moved `CHATBOT_V1_REPORT.md`, `RAG_V1_REPORT.md`,
+`RAG_V2_REPORT.md` → `archive/reports/`. Moved `diag_retrieval.py`,
+`diag_retrieval_sweep.py`, `diagnostic_chatbot.py` →
+`archive/diagnostics/`. Deleted stale `*.log` files. Root now
+contains only the inference entry point, three benchmark scripts,
+`lib/`, `checkpoints/`, and top-level documentation.
+
+## v8-mlp-span-scorer-deeper-evolution (2026-04-19)
 
 **Headline:** retrieval recall@1 = 53.3 %, **extractive answer
 containment = 9.7 %** (+2.0 pp over heuristic baseline, +0.7 pp over
