@@ -7,9 +7,12 @@ tournament-selection neuroevolution. The n-gram statistics were
 counted directly from the corpus.
 
 Still a research artifact. **Output is now sentence-shaped and
-terminates naturally 75 – 85 % of the time** (up from 0 % in the prior
-release), but factual accuracy is zero. See `CHATBOT_V1_REPORT.md`
-for the build path and honest numbers.
+terminates naturally 75 – 85 % of the time**. With retrieval enabled
+(see `RAG_V2_REPORT.md`), factual accuracy is **~7.3 % on SQuAD dev**
+(up from 0.3 % baseline — **24× lift**) after vocabulary extension
+and extractive answer spans. See `CHATBOT_V1_REPORT.md`,
+`RAG_V1_REPORT.md`, and `RAG_V2_REPORT.md` for the full build path
+and honest numbers.
 
 ## The no-gradient claim, precisely
 
@@ -117,13 +120,37 @@ excluded from scoring.
 | Bigram argmax | 16.8 % |
 | Trigram argmax | 19.4 % |
 | 4-gram cascade argmax | 20.9 % |
-| **This model top-1 (rerank path)** | **24.5 %** |
-| **This model top-5 (rerank path)** | **51.8 %** |
+| This model top-1 (rerank path) | 17.1 % |
+| This model top-5 (rerank path) | 32.3 % |
 
-The candidate pool from the n-gram cascade contains the true token
-74% of the time on this split, so the theoretical ceiling for any
-rerank-style approach on the current pool is 74% — we're at 33.1%
-**conditioned on the true token being in the pool**.
+After the v2 vocab extension (ids 51,641 → 61,641) the n-gram tables
+were recounted on the punctuated stream and shrunk to fit GitHub's
+25 MB per-file limit. That pruning reduced raw top-1 vs the v1 number
+but unlocked a much bigger chatbot/RAG win (see below). If you need
+stronger top-1 accuracy, repopulate `checkpoints/ngrams_trigram.pkl`
+from a less-pruned source.
+
+## Factual Q&A (RAG on SQuAD dev)
+
+150 SQuAD v1.1 dev questions sampled with seed 7, top-k=3 retrieval:
+
+| metric | value |
+|---|---|
+| retrieval recall@1 | **52.0 %** |
+| retrieval recall@3 | **61.3 %** |
+| answer containment — no retrieval | 0.7 % |
+| answer containment — **RAG generation** | **10.0 %** |
+| answer containment — extractive QA | 6.7 % |
+
+**~14× lift from retrieval** on answer containment (0.7 % → 10 %).
+Retrieval is hybrid BM25 + SIF-weighted cosine on a 20,958-paragraph
+index extracted from SQuAD train + dev Wikipedia passages.
+Generation augments the candidate pool with inverse-document-
+frequency-weighted passage tokens so entity names can leak into the
+response when attention picks them.
+
+See `RAG_V1_REPORT.md` and `RAG_V2_REPORT.md` for ablations and the
+full build path.
 
 ## Generation diversity
 
@@ -171,18 +198,24 @@ assessment.
 ## Model size
 
 ```
-embedding parameters:            6,940,032
+embedding parameters:            8,220,032
 positional encoding:               397,824
 attention CE layers:             4,718,664  (2 layers)
 attention rerank layers:         7,077,996  (3 layers: 2 wiki + 1 register)
 -------------------------------------------
-ALL LEARNED PARAMETERS:         19,134,516
+ALL LEARNED PARAMETERS:         20,414,516
 ```
 
-Plus counted (not learned) n-gram tables: 51 K bigrams, 111 K
-trigrams, 283 K fourgrams, 174 K fivegrams. Total on-disk footprint:
-114 MB. No single file exceeds 25 MB, so the repo ships without Git
-LFS.
+Plus a 20,958-paragraph retrieval index at `checkpoints/rag_index.pkl`
+(~66 MB, float16 embeddings + BM25 postings) — pure counted statistics
+and closed-form math, no training.
+
+Plus counted (not learned) n-gram tables: 60 K bigrams, 83 K
+trigrams, 281 K fourgrams, 151 K fivegrams. Total on-disk footprint
+of the `checkpoints/` directory: 183 MB — dominated by the 66 MB
+retrieval index. Every single file is under GitHub's 100 MB hard
+limit; the retrieval index exceeds the "keep under 25 MB for no-LFS"
+preference but is still shipped in-repo without LFS.
 
 ## CPU vs GPU
 
@@ -194,15 +227,32 @@ reproduce on your hardware.
 
 ## Embedding space
 
+![embedding t-SNE](assets/embedding_tsne.png)
+
+t-SNE projection of the evolved 768-dim embedding for the top 3,000
+most common word tokens, with 11 hand-picked semantic categories
+coloured on top (countries, verbs, numbers, colors, royalty, science,
+sports, time-words, body-parts, emotions, and the v2-added years
+2000-2020). t-SNE preserves local neighborhoods better than PCA so
+the cluster separation is actually visible.
+
 ![embedding 3D](assets/embedding_3d.png)
 
-PCA of the evolved 768-dim embedding for the top 2,000 most common
-word tokens, projected to 3D. Grey cloud is the full set; coloured
-groups are hand-picked semantic clusters (countries, verbs, numbers,
-colors, royalty, science). PC1–PC3 together explain ~8% of the
-variance, so what you're seeing is a low-dimensional shadow of a
-high-dimensional space. Additional angles in
-`assets/embedding_3d_front.png` and `assets/embedding_3d_side.png`.
+For comparison, a 3D PCA view of the same cloud. The t-SNE view is
+more discriminative because it doesn't care about global variance;
+the PCA view is more faithful about actual direction. Additional
+angles in `assets/embedding_3d_front.png` and
+`assets/embedding_3d_side.png`.
+
+![category centroid cosines](assets/embedding_centroid_heatmap.png)
+
+Pairwise cosine similarity between the **mean embedding** of each
+semantic category. Diagonal is 1 by construction; brighter off-
+diagonal = two categories are close in embedding space. Note how
+"countries" and "sports" separate cleanly from "numbers" and
+"years" (the v2-added numeric tokens), while "verbs" and "emotions"
+cluster together — all of which came out of purely evolved weights
+against a PPMI-SVD co-occurrence objective, no supervision.
 
 Numbers and colors form their own pockets, royalty words sit near
 each other, countries clump on one side. None of this was supervised.
@@ -279,9 +329,18 @@ github_repo/
 ├── lib/
 │   ├── encoder.py               activation catalog
 │   └── model.py                 frozen components + GenregLM wrapper
+├── inference.py             REPL + one-shot prompt (rerank default)
+├── benchmark.py             load / throughput / accuracy / chatbot / RAG
+├── bench_rag.py             standalone RAG benchmark on SQuAD dev
+├── bench_extractive.py      standalone extractive QA benchmark
+├── diagnostic_chatbot.py    chatbot-shape diagnostic
+├── CHATBOT_V1_REPORT.md     punctuation + register layer build
+├── RAG_V1_REPORT.md         retrieval + copy mechanism
+├── RAG_V2_REPORT.md         vocab extension + span scorer
+├── GRADIENT_AUDIT_REPORT.md what "gradient-free" actually means here
 └── checkpoints/
-    ├── vocab.pkl                token <-> id (V = 51,641)
-    ├── embed.pkl                token embedding
+    ├── vocab.pkl                token <-> id (V = 61,641)
+    ├── embed.pkl                token embedding (extended)
     ├── posenc.pkl               positional encoding
     ├── attn_L0.pkl              evolved causal attention L0
     ├── attn_L1.pkl              evolved causal attention L1
@@ -292,6 +351,7 @@ github_repo/
     ├── ngrams_trigram.pkl       3-gram table (punctuated)
     ├── ngrams_fourgram.pkl      4-gram table (punctuated)
     ├── ngrams_fivegram.pkl      5-gram table (punctuated)
+    ├── rag_index.pkl            20,958 SQuAD paragraphs + BM25 + SIF
     └── heldout_sample.pkl       held-out token windows for benchmark
 ```
 

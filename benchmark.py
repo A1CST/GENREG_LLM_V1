@@ -347,6 +347,80 @@ def bench_chatbot_samples(model, seeds=(42,), n_tokens=40):
             print(f"  A: {text}\n")
 
 
+def bench_rag_and_extractive(model, n_questions=150, k=3,
+                              squad_dev_path=None):
+    """Retrieval + RAG generation + extractive QA, measured on SQuAD dev."""
+    if model._rag is None:
+        print("  (rag_index.pkl missing — skipping RAG metrics)")
+        return
+
+    if squad_dev_path is None:
+        squad_dev_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "LLM", "data_raw", "squad_dev.json")
+    if not os.path.exists(squad_dev_path):
+        print(f"  (SQuAD dev not found at {squad_dev_path} — skipping)")
+        return
+
+    import json
+    with open(squad_dev_path) as f:
+        dev = json.load(f)
+    cases = []
+    for art in dev["data"]:
+        for para in art["paragraphs"]:
+            for qa in para["qas"]:
+                if not qa.get("answers"):
+                    continue
+                cases.append({
+                    "q": qa["question"],
+                    "ctx": para["context"],
+                    "answers": [a["text"] for a in qa["answers"]],
+                })
+    rng = np.random.default_rng(7)
+    if 0 < n_questions < len(cases):
+        cases = list(rng.choice(cases, size=n_questions, replace=False))
+
+    rec1 = reck = 0
+    n_norag = n_rag = n_extr = 0
+    n = len(cases)
+
+    t0 = time.time()
+    for i, c in enumerate(cases):
+        hits = model.retrieve(c["q"], k=k)
+        if hits and hits[0]["text"] == c["ctx"]:
+            rec1 += 1
+        if any(h["text"] == c["ctx"] for h in hits):
+            reck += 1
+
+        torch.manual_seed(42 + i)
+        gen_txt, _ = model.generate_rerank(
+            c["q"], max_tokens=30, alpha=5.0, temperature=0.7, top_k=30)
+        torch.manual_seed(42 + i)
+        rag_txt, _, _ = model.generate_rag(
+            c["q"], max_tokens=30, k=1, alpha=5.0,
+            temperature=0.7, top_k=30)
+        extr_txt, _ = model.generate_qa(c["q"], k_retrieve=k, max_span=8)
+
+        golds_l = [a.lower() for a in c["answers"]]
+        if any(a in gen_txt.lower() for a in golds_l):
+            n_norag += 1
+        if any(a in rag_txt.lower() for a in golds_l):
+            n_rag += 1
+        if extr_txt and any(a in extr_txt.lower() for a in golds_l):
+            n_extr += 1
+
+    elapsed = time.time() - t0
+    print(f"  evaluated {n} SQuAD dev questions in {elapsed:.0f}s, k={k}")
+    print()
+    print(f"  retrieval recall@1:    {rec1/n:.3f}  ({rec1}/{n})")
+    print(f"  retrieval recall@{k}:    {reck/n:.3f}  ({reck}/{n})")
+    print()
+    print(f"  answer containment (any gold span is substring of reply):")
+    print(f"    no-RAG generation:   {n_norag/n:.3f}  ({n_norag}/{n})")
+    print(f"    RAG generation:      {n_rag/n:.3f}  ({n_rag}/{n})")
+    print(f"    extractive:          {n_extr/n:.3f}  ({n_extr}/{n})")
+
+
 def main():
     ap = argparse.ArgumentParser(description="GENREG LM benchmark")
     ap.add_argument("--quick", action="store_true",
@@ -355,6 +429,10 @@ def main():
     ap.add_argument("--tokens", type=int, default=100)
     ap.add_argument("--both", action="store_true",
                      help="Run on both CPU and GPU, compare")
+    ap.add_argument("--rag-n", type=int, default=150,
+                     help="SQuAD dev questions for RAG/extractive bench")
+    ap.add_argument("--rag-k", type=int, default=3,
+                     help="retrieval top-k for RAG bench")
     args = ap.parse_args()
 
     if args.both:
@@ -401,9 +479,12 @@ def _run_single(args, device):
     bench_chatbot_shape(model)
 
     if not args.quick:
-        print("\n[8] SAMPLE GENERATIONS (wiki-continuation)")
+        print("\n[8] RAG + EXTRACTIVE ON SQUAD DEV")
+        bench_rag_and_extractive(model, n_questions=args.rag_n,
+                                  k=args.rag_k)
+        print("\n[9] SAMPLE GENERATIONS (wiki-continuation)")
         bench_samples(model)
-        print("\n[9] CHATBOT SAMPLE GENERATIONS")
+        print("\n[10] CHATBOT SAMPLE GENERATIONS")
         bench_chatbot_samples(model)
 
     print("\n" + "=" * 60)

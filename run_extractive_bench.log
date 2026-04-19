@@ -1,0 +1,106 @@
+
+Q: Where is Harvard stadium located?
+  gold: 'Allston'
+  no-RAG: 'in the final . in the second leg of the tour , the band moved on to the next one of the most significant and was named the league in'
+  RAG:    'longwood 5.3'
+  EXTR:   ''
+
+Q: What was the given name of Miami's stadium at the time of Super Bowl 50?
+  gold: 'Sun Life Stadium'
+  no-RAG: 'championship in the united states .'
+  RAG:    "championship francisco depended on levi's"
+  EXTR:   "miami's chances . ."
+
+Q: What was the significance of British win?
+  gold: "confirming Britain's position as the dominant colonial power in eastern North America"
+  no-RAG: 'columbia to the northwest territories in the series .'
+  RAG:    'doubt in answering only one of the linguist at the time the closest to strictly enforced by answering the first time they had the best of the four evangelists answering'
+  EXTR:   ''
+
+Q: Which plateau is the left part of Warsaw on?
+  gold: 'moraine'
+  no-RAG: '. the first of several new songs during the war of the third season of the american association of state highway and transportation phase of the greco had only the'
+  RAG:    '. the first of formations divides moraine divides escarpment and moraine plateau moraine of formations escarpment terraces depicts vistula asymmetrical asymmetrical layout terraces also the main campus relief moraine acted'
+  EXTR:   'plateau and the vistula valley with its asymmetrical .'
+
+Q: How many universities does Newcastle have?
+  gold: 'two'
+  no-RAG: 'upon the album was certified gold by the government .'
+  RAG:    "coveted the rest of the 1834 and was awarded computing uk's"
+  EXTR:   ''
+
+Q: How often are elections for the counsel held?
+  gold: 'every four years'
+  no-RAG: 'in the early part of the 20th century .'
+  RAG:    'in referendums federal government nationals and hallmarks of jurisdictions in the citizenship exceptions hallmarks comparable closeness arguing franchise history referendums to reciprocal investigating hallmarks reciprocal referendums referendums federal reciprocal of'
+  EXTR:   'counsel for the defendants telling .'
+
+Q: What did Wiesner shout out in front of the press during a presentation by von Braun?
+  gold: '"No, that\'s no good"'
+  no-RAG: 'hipper and was the best of the year , and the other is the first known as the golden age of the universe from the anime series and the first'
+  RAG:    'grumman newport lem lunar lem contractors excursion wiesner'
+  EXTR:   'wiesner finally relented , unwilling to settle .'
+
+Q: The flushing action of what expels pathogens from the eyes?
+  gold: 'tears'
+  no-RAG: 'album . the song was also included on the set of the video , recalled that the song was released on dvd and blu ray stevenson and was later certified'
+  RAG:    'externally and trap exoskeleton around urine gastrointestinal cuticle flushing urine openings sneezing mechanically coughing exoskeleton sneezing externally on the sealed intestines are the gastrointestinal intestines shells respiratory urine were urine'
+  EXTR:   'flushing action of tears and urine also mechanically .'
+
+Q: How many times did Newcastle fight off the Scots during the 14th century?
+  gold: 'three times'
+  no-RAG: 'century . the church of scientology as the first in the super mario land series of surveys on its highways in the state to measure the thickness .'
+  RAG:    "1589 el 1400 and 1589 sheriff 1589 imprisoned in lion and they 1400 defend scone england's"
+  EXTR:   'scots three times during the 14th .'
+
+Q: Who did the Dutch fight in the Dutch Revolt?
+  gold: 'Spain'
+  no-RAG: 'east indies . in the late 1950s , and the other four were placed in subgenus of the united states from the greek for the first time since the breakup'
+  RAG:    "voiceless bread undergo doesn't"
+  EXTR:   ''
+
+Q: What was the definition of professionals, for this study?
+  gold: 'priests, religious leaders, and case workers as well as teachers'
+  no-RAG: 'reason , the first in the nfl draft , which are mostly still in the process of being involved in the early 1970s .'
+  RAG:    'reason eleventh in the excluded universally excluded eleventh constitutes exclusively judgement of the series judgement considers constitutes the classifies the first to objective excluded eleventh studio album classifies the classifies'
+  EXTR:   ''
+
+Q: Le Grande also wrote that defining the term civil disobedience so difficult it could be described as? 
+  gold: 'impossible'
+  no-RAG: 'as an example of the perpendicular to the cap surface is dry and rather than the result of the match , the undertaker in the casket and was one of'
+  RAG:    "overthrow the spanish disobedience abolish the zinn doesn't"
+  EXTR:   'disobedience accomplishing revolution . howard zinn , harvey .'
+
+Q: What was Temüjin' sister's name?
+  gold: 'Temülen'
+  no-RAG: 'then the largest single grant from the national geographic society and the new york times said the game , the player has to be the first in the state of'
+  RAG:    'sum of one year thing about this time theoretically the conform strictly as the whitehead whitehead of the game sum of its relations with the united synthesis sum 41 released'
+  EXTR:   ''
+
+Q: In what year did the FCC begin an investigation in to the operation of radio networks in America
+  gold: '1938'
+  no-RAG: '. the first of these was the first time the british were planning to kill the irishman , and the new york shipbuilding corporation .'
+  RAG:    'licenses 1938 complaint to the north in forbidding the first investigations were the first to rca hint of saturated by the end licenses and forbidding fcc does licenses were the'
+  EXTR:   '1934 , mutual filed complaint .'
+
+Q: What chemist managed to make enough liquid oxygen to use for study?
+  gold: 'James Dewar'
+  no-RAG: 'the purpose of the war , both the democrats , but the only known hawaiian or pacific islander to die of the american police and the second in the series'
+  RAG:    'evaporated drops chemist and evaporated following the raoul compressing the announcing the landmark number of occasions 1877 35 evaporated following drops meaningful and realized molecular telegram on the south telegram'
+  EXTR:   'chemist and physicist raoul pierre evaporated liquid sulfur .'
+
+============================================================
+EXTRACTIVE BENCHMARK (100 questions, k=3)
+============================================================
+  retrieval recall@1:   0.480
+  retrieval recall@3:   0.580
+
+  answer containment:
+    no-RAG generation:   0.000
+    RAG generation:      0.080
+    EXTRACTIVE:          0.070
+
+  token-F1 (mean):
+    no-RAG generation:   0.020
+    RAG generation:      0.044
+    EXTRACTIVE:          0.048
