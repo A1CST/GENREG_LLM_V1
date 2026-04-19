@@ -953,8 +953,7 @@ class GenregLM:
 
         # STAGE 2: if MLP is loaded, rerank top-FILTER_K heuristic candidates
         if mlp_qf_t is not None and mlp_stage_spans:
-            # FILTER_K must match the training value in
-            # genreg_span_mlp.py (currently 100).
+            # FILTER_K must match the v6 training value (100).
             FILTER_K = 100
             mlp_stage_spans.sort(key=lambda x: -x["heur_sc"])
             filtered = mlp_stage_spans[:FILTER_K]

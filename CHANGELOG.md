@@ -5,7 +5,22 @@ or AI) can tell at a glance what state the repo is in. Each version
 block includes the headline accuracy number and the honest limitation
 that defines the next move.
 
-## v6-mlp-span-scorer-bigdata (2026-04-19, current)
+## Ship state (2026-04-19)
+
+**Current deployed:** heuristic-only extractive = 7.7 % (v4). The v6
+MLP ensemble (9.0 %) is being retrained after an experimental v7 run
+overwrote the weights. v7 widened MAX_SPAN 8→12 and FILTER_K 100→120;
+val top-1 improved (29.6 → 36.2 %, +14.2 pp val lift) but dev
+extractive *regressed* to 7.3 % — widening changed the candidate
+distribution enough that the model's relative signal weights don't
+transfer cleanly. Lesson: inference-time span-length distribution
+must match training exactly; longer spans dominate the heuristic's
+top-K pool and the MLP optimizes for a different pool than it sees.
+
+v6 retrain is in progress. When complete, extractive returns to
+9.0 % shipping state.
+
+## v6-mlp-span-scorer-bigdata (2026-04-19)
 
 **Headline:** retrieval recall@1 = 53.3 %, **extractive answer
 containment = 9.0 %** (+1.3 pp over heuristic-only v4, +0.3 pp over
@@ -19,7 +34,8 @@ top-100 heuristic filter. val top-1 = 29.6% (heuristic baseline
 Progression:
 - Heuristic only (v4):   7.7 % extractive
 - MLP 2.4K QA, top-50:   8.7 %  (v5)
-- MLP 9.6K QA, top-100:  **9.0 %** (v6 — current)
+- MLP 9.6K QA, top-100:  **9.0 %** (v6)
+- MLP 4.8K QA, top-120, MAX_SPAN=12: 7.3 % (v7 — regressed, REVERTED)
 
 ## v5-mlp-span-scorer (2026-04-19)
 

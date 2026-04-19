@@ -1,13 +1,12 @@
 # GENREG LM
 
-**Version: 2026-04-19 v6-mlp-span-scorer-bigdata** — retrieval
-recall@1 53.3 %, **extractive answer containment 9.0 %** (up from
-7.7 % heuristic-only; +12.3 pp val lift from an MLP span scorer
-trained on 9.6K SQuAD QA pairs with train/val split, containment
-labels, top-100 filter, and ensemble β = -1.05). SQuAD v1.1 dev,
-300-q sample, seed 7. See `CHANGELOG.md` for the full six-version
-history including the four prior span-scorer failures that led to
-this design.
+**Version: 2026-04-19 v4-shipped + v6-restore-in-progress** —
+retrieval recall@1 53.3 %, **extractive answer containment 7.7 %**
+(heuristic-only, currently deployed while v6 MLP ensemble is being
+re-trained after a v7 experiment regressed). v6 benchmarked at
+9.0 % extractive; restore expected to land it back. See
+`CHANGELOG.md` for the full version history including seven documented
+span-scorer iterations and the v7 distribution-mismatch finding.
 
 A chatbot-shaped language model trained **without gradient descent,
 without backpropagation, and without closed-form regression** against
@@ -157,9 +156,9 @@ BM25 (k1=1.2, b=0.5, blend=0.85):
 | retrieval recall@3 | 68.3 % |
 | retrieval recall@10 | 78.0 % |
 | answer containment — no retrieval | 0.3 % |
-| answer containment — heuristic extractive (v4) | 7.7 % |
-| answer containment — MLP ensemble (v5, 2.4K QA) | 8.7 % |
-| answer containment — **MLP ensemble (v6, 9.6K QA)** | **9.0 %** |
+| answer containment — **heuristic extractive (currently deployed)** | **7.7 %** |
+| answer containment — MLP ensemble (v5, 2.4K QA)  | 8.7 % (was deployed) |
+| answer containment — MLP ensemble (v6, 9.6K QA)  | 9.0 % (restore pending) |
 | answer containment — RAG generation | 6.0 % |
 | extractive F1 | 0.065 |
 | conditional extraction (given recall@1 hit) | ~13 % |
