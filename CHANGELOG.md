@@ -7,18 +7,19 @@ that defines the next move.
 
 ## Ship state (2026-04-19)
 
-**Current deployed:** heuristic-only extractive = 7.7 % (v4). The v6
-MLP ensemble (9.0 %) is being retrained after an experimental v7 run
-overwrote the weights. v7 widened MAX_SPAN 8→12 and FILTER_K 100→120;
-val top-1 improved (29.6 → 36.2 %, +14.2 pp val lift) but dev
-extractive *regressed* to 7.3 % — widening changed the candidate
-distribution enough that the model's relative signal weights don't
-transfer cleanly. Lesson: inference-time span-length distribution
-must match training exactly; longer spans dominate the heuristic's
-top-K pool and the MLP optimizes for a different pool than it sees.
+**Current deployed: v6-mlp-span-scorer-bigdata at 9.0 % extractive.**
 
-v6 retrain is in progress. When complete, extractive returns to
-9.0 % shipping state.
+v7 experiment (MAX_SPAN 8→12, FILTER_K 100→120) improved val top-1
+(29.6 → 36.2 %, +14.2 pp val lift) but dev extractive *regressed* to
+7.3 %. Widening changed the candidate distribution enough that the
+model's relative signal weights don't transfer cleanly. Reverted.
+Lesson: inference-time span-length distribution must match training
+exactly; longer spans dominate the heuristic's top-K pool and the MLP
+optimizes for a different pool than it sees.
+
+v6 weights were overwritten by v7 but retrain reproduced identically
+(training is deterministic on seed). Restored + verified = 9.0 % on
+same 300-q SQuAD dev sample.
 
 ## v6-mlp-span-scorer-bigdata (2026-04-19)
 
