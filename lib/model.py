@@ -251,6 +251,27 @@ class GenregLM:
             self._span_scorer_b = float(sp["b"])
             self._span_scorer = sp
 
+        # Evolved query-adaptive retrieval reranker
+        self._reranker = None
+        rr_path = os.path.join(ckpt_dir, "retrieval_reranker.pkl")
+        if os.path.exists(rr_path):
+            with open(rr_path, "rb") as f:
+                rr = pickle.load(f)
+            self._reranker_W = torch.from_numpy(
+                rr["W"].astype(np.float32)).to(self.device)
+            self._reranker = rr
+
+        # Evolved query-adaptive span scorer (v3)
+        self._span_qa = None
+        sv3_path = os.path.join(ckpt_dir, "span_scorer_qa.pkl")
+        if os.path.exists(sv3_path):
+            with open(sv3_path, "rb") as f:
+                sv3 = pickle.load(f)
+            if sv3.get("version") == "span_scorer_v3_query_adaptive":
+                self._span_qa_W = torch.from_numpy(
+                    sv3["W"].astype(np.float32)).to(self.device)
+                self._span_qa = sv3
+
     def tokenize(self, text):
         words = text.lower().split()
         ids = [self.token_to_id.get(w, self.token_to_id["<unk>"]) for w in words]
@@ -327,6 +348,52 @@ class GenregLM:
         return sorted(cands.items(), key=lambda x: -x[1])[:K]
 
     # ----- Retrieval (RAG) --------------------------------------------
+
+    def _compute_qfeats(self, q_ids_tensor):
+        """10-dim query features for the retrieval reranker.
+        Matches genreg_retrieval_reranker.py order."""
+        if q_ids_tensor.numel() == 0:
+            return np.zeros(10, dtype=np.float32)
+        q_ids = q_ids_tensor.cpu().tolist()
+        ql = self.detokenize(q_ids).lower().strip()
+        # Classify
+        is_when = is_who = is_where = is_what = is_how = 0.0
+        if ql.startswith("when") or "what year" in ql or "what date" in ql:
+            is_when = 1.0
+        elif ql.startswith("who") or ql.startswith("whom"):
+            is_who = 1.0
+        elif ql.startswith("where"):
+            is_where = 1.0
+        elif ql.startswith("how"):
+            is_how = 1.0
+        elif ql.startswith("what") or ql.startswith("which"):
+            is_what = 1.0
+        # has_digit
+        digit_tok_ids = {self.token_to_id.get(c) for c in "0123456789"} - {None}
+        has_digit = 0.0
+        for t in q_ids:
+            if t in digit_tok_ids:
+                has_digit = 1.0; break
+            s = self.id_to_token.get(int(t), "")
+            if s and s[0].isdigit():
+                has_digit = 1.0; break
+        STRUCTURAL = {66, 67}
+        content = [t for t in q_ids if t >= CHAR_CUTOFF and t not in STRUCTURAL]
+        tok_w = self._tok_weight if hasattr(self, "_tok_weight") else None
+        if tok_w is None or not content:
+            return np.array([is_when, is_who, is_where, is_what, is_how,
+                              has_digit, 0.0, 0.0,
+                              min(len(q_ids) / 20.0, 1.0), 1.0],
+                             dtype=np.float32)
+        tw_np = tok_w.cpu().numpy() if tok_w.is_cuda else tok_w.numpy()
+        rare_count = sum(1 for t in content if tw_np[t] > 0.3)
+        max_sif = max((tw_np[t] for t in content), default=0.0)
+        return np.array([is_when, is_who, is_where, is_what, is_how,
+                          has_digit,
+                          min(rare_count / 5.0, 1.0),
+                          float(max_sif),
+                          min(len(q_ids) / 20.0, 1.0),
+                          1.0], dtype=np.float32)
 
     @torch.no_grad()
     def retrieve(self, query, k=3, bm25_weight=0.85, bm25_k1=1.2, bm25_b=0.5,
@@ -446,6 +513,80 @@ class GenregLM:
             bm25_t = (bm25_t - bm25_t.mean()) / (bm25_t.std() + 1e-8)
 
         scores = bm25_weight * bm25_t + (1 - bm25_weight) * dense_scores
+
+        # ---- Query-adaptive rerank (evolved 10×5 head, OPT-IN) ----
+        # Small improvement at recall@1 but slight regression at @3,
+        # so off by default. Pass rerank=True to enable.
+        if (self._reranker is not None and self._rag_chunked
+                and getattr(self, "_use_reranker", False)):
+            pre_k = min(20, scores.shape[0])
+            pre_top = scores.topk(pre_k)
+            top_indices = pre_top.indices.cpu().tolist()
+            # Query features
+            qf = self._compute_qfeats(q_ids)               # (10,)
+            qf_t = torch.tensor(qf, device=self.device,
+                                 dtype=torch.float32)
+            # Softmax weights over the 5 signals
+            logits_per_sig = torch.einsum('ig,i->g',
+                                           self._reranker_W, qf_t)
+            weights = F.softmax(logits_per_sig, dim=0)     # (5,)
+            # Per-candidate signal vectors
+            q_content_list = list(q_content)
+            q_has_digit = qf[5]
+            # Build query SIF vector once for signals
+            emb_n_q = emb_n
+            if q_content_list:
+                q_t = torch.tensor(q_content_list, device=self.device)
+                qw_sig = self._tok_weight[q_t].unsqueeze(1)
+                q_vec_sig = (emb_n_q[q_t] * qw_sig).sum(dim=0) / (qw_sig.sum() + 1e-8)
+                q_vec_sig = q_vec_sig - self._sif_mean.squeeze(0)
+                q_vec_sig = q_vec_sig - (q_vec_sig @ self._sif_top_pc) * self._sif_top_pc
+                q_vec_sig = F.normalize(q_vec_sig.unsqueeze(0), dim=1).squeeze(0)
+            else:
+                q_vec_sig = None
+            # Query bigrams for bm25_bigram signal
+            q_bigrams = set()
+            for i in range(len(q_content_list) - 1):
+                q_bigrams.add((q_content_list[i], q_content_list[i + 1]))
+            digit_tok_ids = {self.token_to_id.get(c) for c in "0123456789"} - {None}
+            id2tok = self.id_to_token
+            chunk_tokens_list = self._rag.get("chunk_token_lists", [])
+
+            new_scores = torch.full_like(scores, -1e9)
+            for ci in top_indices:
+                # Use RAW (not z-scored) BM25 and SIF values to match
+                # training distribution.
+                s1 = float(bm25[ci])
+                # Raw dense cosine requires recomputing (pre-z-score).
+                # Approximate from the embedding directly.
+                s2 = float((self._rag_emb[ci] * q_emb).sum().item())
+                # s3: BM25 over bigrams
+                chunk_toks = chunk_tokens_list[ci] if chunk_tokens_list else []
+                c_bigrams = {}
+                for i in range(len(chunk_toks) - 1):
+                    pair = (chunk_toks[i], chunk_toks[i + 1])
+                    c_bigrams[pair] = c_bigrams.get(pair, 0) + 1
+                s3 = 0.0
+                for bg in q_bigrams:
+                    if bg in c_bigrams:
+                        s3 += _math.log(1.0 + c_bigrams[bg])
+                # s4: length match
+                cl = float(len_arr[ci])
+                s4 = 1.0 - min(abs(cl - avgdl) / max(avgdl, 1e-6), 1.0)
+                # s5: numeric coincidence
+                chunk_has_digit = 0.0
+                for t in chunk_toks[:200]:
+                    if t in digit_tok_ids:
+                        chunk_has_digit = 1.0; break
+                    s = id2tok.get(int(t), "")
+                    if s and s[0].isdigit():
+                        chunk_has_digit = 1.0; break
+                s5 = float(q_has_digit) * chunk_has_digit
+                sig_vec = torch.tensor([s1, s2, s3, s4, s5],
+                                         device=self.device,
+                                         dtype=torch.float32)
+                new_scores[ci] = float((weights * sig_vec).sum().item())
+            scores = new_scores
 
         # Pseudo-relevance feedback: take top-prf_top chunks, extract
         # the top prf_terms rarest content tokens (excluding query
@@ -610,9 +751,20 @@ class GenregLM:
         qtype = self._classify_question(query)
         tok_weight_np = self._tok_weight.cpu().numpy()
 
-        # Precompute globals for v2 span scorer features
+        # Precompute globals for v2/v3 span scorer features
         token_df_dict = self._rag["token_df"] if self._rag else {}
         N_docs_val = self._rag["N_docs"] if self._rag else 1
+
+        # For the v3 query-adaptive scorer: precompute the query
+        # feature vector + softmax weights over span features.
+        v3_weights = None
+        if self._span_qa is not None and self._rag is not None:
+            qf_np = self._compute_qfeats(q_ids_t)
+            qf_t = torch.tensor(qf_np, device=self.device,
+                                 dtype=torch.float32)
+            logits_per_sig = torch.einsum('ig,i->g',
+                                           self._span_qa_W, qf_t)
+            v3_weights = F.softmax(logits_per_sig, dim=0)   # (8,)
 
         # Normalize retrieval scores across hits to [0,1]
         import math as _math
@@ -696,7 +848,22 @@ class GenregLM:
                                  first_rare, last_rare]
                     retr_score = float(retr_score_by_h[h_idx])
 
-                    if (self._span_scorer is not None
+                    if v3_weights is not None:
+                        # v3 query-adaptive: 8-dim span feature vector
+                        # matching SFEAT_NAMES order in
+                        # genreg_span_scorer_v3.py
+                        v3_feats = torch.tensor([
+                            bm25_span_q,
+                            rarity_sum,
+                            rarity_max,
+                            numeric,
+                            min(L_ / 8.0, 1.0),
+                            first_rare,
+                            last_rare,
+                            semantic,
+                        ], device=self.device, dtype=torch.float32)
+                        score = float((v3_weights * v3_feats).sum().item())
+                    elif (self._span_scorer is not None
                             and self._span_scorer.get("version") == "v2_cross_passage"):
                         ft = torch.tensor(feat_vec, device=self.device,
                                            dtype=torch.float32)

@@ -1,8 +1,10 @@
 # GENREG LM
 
-**Version: 2026-04-18 v3-chunked-rag** — retrieval recall@1 53.3 %,
-extractive answer-containment 8.3 % on SQuAD v1.1 dev (300-q sample,
-seed 7). See `CHANGELOG.md` for per-version deltas.
+**Version: 2026-04-18 v4-query-adaptive-retrieval** — retrieval
+recall@1 53.3 % (54.0 % with opt-in reranker), extractive answer
+containment 7.7 % on SQuAD v1.1 dev (300-q sample, seed 7). See
+`CHANGELOG.md` for per-version deltas and the four documented
+span-scorer failure modes.
 
 A chatbot-shaped language model trained **without gradient descent,
 without backpropagation, and without closed-form regression** against
@@ -147,16 +149,22 @@ BM25 (k1=1.2, b=0.5, blend=0.85):
 
 | metric | value |
 |---|---|
-| retrieval recall@1 | **53.3 %** |
-| retrieval recall@3 | **68.3 %** |
+| retrieval recall@1 (hybrid BM25 + SIF) | **53.3 %** |
+| retrieval recall@1 (+ query-adaptive reranker, opt-in) | 54.0 % |
+| retrieval recall@3 | 68.3 % |
 | retrieval recall@10 | 78.0 % |
 | answer containment — no retrieval | 0.3 % |
-| answer containment — **extractive QA** | **8.3 %** |
-| answer containment — RAG generation | 5.7 % |
-| extractive F1 | 0.075 |
-| conditional extraction (given recall@1 hit) | ~10.7 % |
+| answer containment — **extractive QA** | **7.7 %** |
+| answer containment — RAG generation | 6.0 % |
+| extractive F1 | 0.065 |
+| conditional extraction (given recall@1 hit) | ~11 % |
 
-**~28× lift from retrieval** on answer containment (0.3 % → 8.3 %).
+**~26× lift from retrieval** on answer containment (0.3 % → 7.7 %).
+The query-adaptive retrieval reranker at
+`checkpoints/retrieval_reranker.pkl` is shipped but OFF by default —
+on the held-out dev set it adds ~0.7 pp at recall@1 and loses ~1 pp
+at recall@3. Enable by setting `model._use_reranker = True` after
+loading.
 Retrieval is hybrid BM25 + SIF-weighted cosine on 46,586 paragraph
 chunks extracted from SQuAD train + dev Wikipedia passages
 (paragraphs are split into 80-token windows with 20-token overlap,

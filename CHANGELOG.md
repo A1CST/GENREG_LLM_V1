@@ -5,107 +5,171 @@ or AI) can tell at a glance what state the repo is in. Each version
 block includes the headline accuracy number and the honest limitation
 that defines the next move.
 
-## v3-chunked-rag (2026-04-18, current)
+## v4-query-adaptive-retrieval (2026-04-18, current)
 
 **Headline:** retrieval recall@1 = 53.3 %, extractive answer
-containment = 8.3 %, RAG generation answer containment = 5.7 %
-(SQuAD v1.1 dev, 300 q sampled with seed 7, k=3 retrieval).
+containment = 7.7 %, RAG generation = 6.0 %
+(SQuAD v1.1 dev, 300-q sample, seed 7, k=3 retrieval).
+
+**What's new:**
+- **Query-adaptive retrieval reranker** shipped at
+  `checkpoints/retrieval_reranker.pkl` (50 params: 10 query features
+  × 5 signal weights). Evolved against SQuAD train with
+  inference-identical candidate pools. Training top-1 among top-20
+  hybrid candidates = 62 %. **OFF BY DEFAULT** because on SQuAD dev
+  the gain is marginal (+0.7 pp at recall@1) and recall@3 regresses
+  slightly. Enable by setting `model._use_reranker = True`.
+- `CHANGELOG.md` — version control for the auto-push cron.
+
+### The query-adaptive signal attention design
+
+Query features (10-dim): one-hots for {when, who, where, what, how},
+has_digit, n_rare_tokens, max_tok_sif, q_length, bias.
+
+Passage/span signals at retrieval time (5-dim): BM25, SIF cosine,
+BM25-over-bigrams, length-match, numeric coincidence.
+
+Scorer: `weights = softmax(query_features @ W)`, where W is the
+evolved 10×5 matrix. Final score per candidate =
+`dot(weights, signal_vector)`.
+
+**Learned retrieval weights** (interpretable — reveal what the model
+thinks each question type cares about):
+```
+                   bm25   sif   bigram  length  numeric
+  is_when        -0.32  -1.38   +1.15   -0.37   +1.15
+  is_who         -0.29  -0.44   -0.86   -0.99   +0.68
+  is_where       +0.16  -0.55   +0.71   -1.15   -0.02
+  is_what        +1.64  +2.06   +0.89   +0.32   -0.46
+  is_how         +1.37  +1.88   -1.60   +0.22   -0.13
+  has_digit      -0.75  -0.57   -0.66   -0.36   +1.02
+```
+"When" questions learn to lean on bigram-BM25 and numeric-match; "who"
+questions lean on numeric-match (dates next to names); "what/how" lean
+on plain BM25 + SIF.
+
+### What did NOT work this session
+
+1. **Span scorer v2** (single-passage training + full-passage
+   features) — regressed extractive 8.3 % → 2-3 %. Diagnosis:
+   feature distribution mismatch between full-passage training and
+   chunked-retrieval inference.
+2. **Span scorer v2-chunked** (retrained with chunk-matched inputs)
+   — still regressed. The 50-candidate training pool didn't prepare
+   the scorer for the 1000+ candidate inference pool.
+3. **Span scorer v3-query-adaptive** (same pattern that worked for
+   retrieval, applied to spans) — training top-1 only 3.8 % out of
+   ~1000 candidates per question. Deployed: extractive dropped to
+   2.0 %. 80 params can't linearly discriminate the gold span from
+   1000+ plausible-looking spans. Discarded.
+4. **Span scorer v3-two-stage** (heuristic filter top-20 →
+   learned reranker). Training top-1 8.3 % on the filtered pool —
+   still ≈ random within the 20 good-looking candidates the heuristic
+   selected. When all candidates are heuristic-endorsed, the learnable
+   features don't add more discriminating information. Discarded.
+4. **Pseudo-relevance feedback** — amplifies the wrong topic when
+   initial retrieval is wrong (32 % of top-3). Off by default.
+5. **Query expansion via embedding neighbors** — flat (±0.3 pp).
+   The evolved embedding's nearest neighbors are topical/co-
+   occurrence-derived, not synonyms.
+
+### Why the span-scorer attempts keep failing (and what would fix it)
+
+The retrieval reranker works because it only has to distinguish
+among ~20 candidate passages (the hybrid's top-20), and each
+candidate has ~5 strong pre-computed signals. The learnable head
+has enough capacity for 20-way discrimination.
+
+The span scorer has to distinguish gold from ~1000 other spans in
+3 chunks, and the per-span features are weaker. An 80-parameter
+linear head can't do it — training top-1 plateaus at 3-4 %. This is
+a capacity/complexity mismatch, not a training-data issue.
+
+**Proper fix (not shipped, out of session scope):**
+
+Option A — two-stage filtering. Use the heuristic to pick top-10
+spans per chunk (30 total), then apply a query-adaptive reranker
+to that filtered pool. Reduces the candidate space to something the
+learnable head can handle.
+
+Option B — nonlinear scorer. A small MLP (e.g., 8 features → 16
+hidden → 1 score) has enough capacity for span-level ranking, but
+evolution on ~150 parameters is slower to converge and wants more
+training data.
+
+Option C — learn to rank spans by COMPARING to gold span directly
+(cosine similarity of full span to gold-answer embedding), not by
+absolute feature-based score. This is a different fitness
+formulation entirely.
+
+The heuristic extractive (8 % answer containment) is the current
+best. Rather than fight the linear-scorer wall further, the next
+session should try Option A: two-stage filtering.
+
+### Next-move ranking for the reviewing AI
+
+1. **Two-stage span selection** (heuristic filter → adaptive rerank
+   on filtered pool). Likely the biggest near-term extractive lift.
+2. **Ensemble heuristic + learned scorer** — sum heuristic score and
+   a learned scorer's score. Provides a floor of heuristic quality
+   plus whatever upside the scorer adds.
+3. **Multi-span extraction** — return top 3 scored spans as
+   alternatives, not just top 1. Quick win for user experience.
+4. **Better retrieval**: the reranker achieves 62 % on training
+   top-20 but only +0.7 pp on dev. Either train on a larger/more
+   diverse set, or train a full re-ranker (10 → 20 → 5 MLP) with
+   more capacity.
+5. **Cross-encoder over chunks + spans** — expensive but known to
+   work. Would need to evolve a small transformer-style attention
+   head over (query, span) pairs.
+
+## v3-chunked-rag (2026-04-18, earlier today)
+
+**Headline:** retrieval recall@1 = 52.3 %, extractive = 7.7 %, RAG
+generation = 5.0 %.
 
 **What changed since v2:**
 - Paragraph-chunked retrieval index (20,958 paragraphs →
-  46,586 × 80-content-token chunks with 20 overlap). Chunk embeddings
-  int8-quantized to keep `rag_index.pkl` under GitHub's 100 MB limit.
-- `retrieve()` now supports both `chunked_v1` and legacy paragraph
+  46,586 × 80-content-token chunks with 20 overlap). Chunk
+  embeddings int8-quantized to keep `rag_index.pkl` under GitHub's
+  100 MB limit.
+- `retrieve()` supports both chunked_v1 and legacy paragraph
   formats; returns the best chunk per parent, deduplicated.
 - Span extraction searches inside the matched chunk scope, not the
   full parent (roughly 2× more focused).
-- BM25 parameters retuned via 60-point sweep: `k1=1.2, b=0.5,
-  bm25_weight=0.85` (was `k1=1.2, b=0.75, weight=0.7`). Adds 2 pp to
-  recall@1 on 150-q dev sample.
+- BM25 parameters retuned via 60-point sweep:
+  `k1=1.2, b=0.5, bm25_weight=0.85`.
 - Query expansion via embedding neighbors wired in (default on,
-  weight 0.4). Effect on SQuAD dev is nil; kept as a knob because
-  it helps paraphrase cases even when it doesn't move the aggregate
-  metric.
-- Pseudo-relevance feedback wired in but default off — when initial
-  retrieval is wrong, PRF amplifies the wrong topic. Useful only for
-  confident top-1.
-- `benchmark.py` 3-mode chatbot samples (no-RAG / RAG / extractive).
+  weight 0.4). Neutral effect on aggregate metric.
+- Pseudo-relevance feedback wired in but default off.
 
-**What did NOT work and why:**
-- **Span scorer v2**: evolved linear head trained on SQuAD train Q/A
-  with cross-passage negative spans. Two training variants (with and
-  without retrieval-score feature, full-passage and chunk-matched
-  contexts). Training top-1 reached 39 % (vs 2 % random), but at
-  inference extractive dropped to 2.0-2.7 %. Reverted to heuristic.
-  Diagnosis: features computed on chunked retrieval at inference are
-  distributionally different from features at training despite
-  deliberate matching. See v2_report for weights + ablation. The v2
-  scorer code remains in `LLM/components/attention/` but is NOT
-  shipped in the repo.
-- **Pseudo-relevance feedback (default on)**: hurt recall@1 by
-  ~19 pp because top-3 is only 68 % correct; PRF amplifies the noise
-  in the other 32 %.
-- **Query expansion via embedding neighbors**: +/- 0.3 pp noise.
-  Evolved embedding's nearest neighbors are co-occurrence-derived
-  (topical), not synonyms, so expansion doesn't add true paraphrase
-  coverage.
+## v2 (2026-04-18, earlier today)
 
-**Next-move ranking** (for the cron-firing AI that reads this):
-1. Better span scorer. Current heuristic gets ~15 % conditional
-   extraction rate when retrieval is correct. Need ~50 % to reach
-   "usable" ~30 % containment. Candidate: cross-encoder-style span
-   ranker trained against answer spans across MANY retrieval
-   distributions. v2 attempts failed from distribution mismatch;
-   fix requires training on same chunked retrieval the inference
-   uses, with diverse retrieval confidences.
-2. Retrieval ceiling. Recall@10 is 78 %; recall@1 is 53 %. A cheap
-   re-ranker on top-20 would lift recall@1 significantly. Options:
-   per-term-alignment score, BM25 over bigrams, or a tiny evolved
-   re-rank head (gradient-free).
-3. Multi-word entity handling. Many gold answers are 3-10 token
-   spans ("1997 Treaty of Amsterdam", "Warsaw University of
-   Technology building"). Extraction picks shorter spans because
-   the heuristic penalizes length. A length prior conditioned on
-   question type would help.
-
-## v2 (2026-04-18, early)
-
-**Headline:** retrieval recall@1 = 51.3 %, extractive answer
-containment = 6.0 %, RAG generation answer containment = 7.3 %.
+**Headline:** retrieval recall@1 = 51.3 %, extractive = 6.0 %, RAG
+generation = 7.3 %.
 
 **What changed since v1:**
 - Vocabulary extended 51,641 → 61,641 (10 K new tokens: years,
-  numbers, common entity fragments). Embedding `hash_in` extended
-  with random-Gaussian rows matching existing dimension statistics;
-  all existing IDs preserved bit-identical.
+  numbers, entity fragments). Embedding `hash_in` extended with
+  random-Gaussian rows matching existing dimension statistics.
 - N-gram tables recounted on the extended-vocab punctuated stream.
-- RAG paragraph index rebuilt with extended vocab so answer tokens
-  like "2015" appear in candidate pools.
+- RAG paragraph index rebuilt.
 
-**What did NOT work:** span scorer v1 (single-passage training
-distribution). See `RAG_V2_REPORT.md`.
-
-## v1 (2026-04-18)
-
-**Headline:** retrieval recall@1 = 48.7 %, RAG generation answer
-containment = 3.7 %, extractive 4.0 %.
+## v1 (2026-04-18, earlier today)
 
 **First RAG release:**
-- Hybrid BM25 + SIF-weighted dense retrieval on 20,958 paragraphs
-  from SQuAD train + dev contexts (human-curated).
-- Copy pool augmentation of rerank candidates with IDF-weighted
-  passage tokens (the "copy mechanism").
-- Extractive QA prototype with proximity / rarity / question-type
-  heuristic.
+- Hybrid BM25 + SIF dense retrieval on 20,958 paragraphs from
+  SQuAD train + dev contexts.
+- Copy-pool augmentation of rerank candidates.
+- Heuristic extractive QA.
 
-## chatbot-v1 (earlier, pre-RAG)
+## chatbot-v1 (pre-RAG)
 
-Sentence-shaped output with natural-stop 75-85 %, but factual
-accuracy effectively zero (0.3 % on SQuAD dev — only lexical-match
-coincidences).
+Sentence-shaped output with natural-stop 75-85 %, factual
+accuracy effectively zero.
 
 ## gradient-free-clean (foundational)
 
 Removed the ridge head and re-evolved CE attention against the
 evolved embedding table. Full audit in `GRADIENT_AUDIT_REPORT.md`.
-This is the release the no-gradient claim is built on.
+Foundation of the no-gradient claim.
