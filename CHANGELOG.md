@@ -5,9 +5,47 @@ or AI) can tell at a glance what state the repo is in. Each version
 block includes the headline accuracy number and the honest limitation
 that defines the next move.
 
-## Ship state (2026-04-19)
+## v8-mlp-span-scorer-deeper-evolution (2026-04-19, current)
 
-**Current deployed: v6-mlp-span-scorer-bigdata at 9.0 % extractive.**
+**Headline:** retrieval recall@1 = 53.3 %, **extractive answer
+containment = 9.7 %** (+2.0 pp over heuristic baseline, +0.7 pp over
+v6), F1 = 0.077 (up from 0.069). Same training data and architecture
+as v6; the difference is evolutionary exploration depth.
+
+**What changed:** POP 48 → 96, GENS 600 → 1500 on identical 9.6K QA
+training data and 446/446 train/val batches. More exploration time
+found a better fitness basin: val top-1 29.6 % → 32.3 %, val lift
++12.3 → +15.0 pp over heuristic baseline.
+
+Learned β (ensemble weight) dropped from -1.05 (v6) to -0.67 (v8).
+The MLP is now contributing less magnitude but more reliably — a
+sharper, smaller signal on top of the heuristic rather than a loud
+correction. Consistent with "better basin" — earlier runs found
+high-amplitude but partially-noisy signal.
+
+**Progression:**
+- Heuristic baseline (v4):    7.7 %
+- MLP 2.4K QA, top-50  (v5):  8.7 %  (+1.0 pp)
+- MLP 9.6K QA, top-100 (v6):  9.0 %  (+0.3 pp)
+- MLP 9.6K QA, POP 96, GENS 1500 (v8): **9.7 %** (+0.7 pp)
+
+## v7-mlp-wider-spans (reverted, 2026-04-19)
+
+**Headline:** extractive regressed to 7.3 % despite +14.2 pp val lift.
+
+**What was tried:** MAX_SPAN 8→12, FILTER_K 100→120. Widened
+candidate pool and span lengths to catch longer gold answers.
+
+**Why it failed:** widening changed the candidate distribution
+enough that the model's relative signal weights don't transfer
+cleanly. Longer spans dominate the heuristic's top-K pool at
+inference, and the MLP optimizes for a different pool than it
+sees. Reverted to v6 config.
+
+**Lesson:** inference-time span-length and candidate-pool
+distribution must match training exactly. Evolution can find
+solutions that are optimal on one distribution but mis-specified
+on another.
 
 v7 experiment (MAX_SPAN 8→12, FILTER_K 100→120) improved val top-1
 (29.6 → 36.2 %, +14.2 pp val lift) but dev extractive *regressed* to
