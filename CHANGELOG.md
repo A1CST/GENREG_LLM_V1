@@ -5,7 +5,48 @@ or AI) can tell at a glance what state the repo is in. Each version
 block includes the headline accuracy number and the honest limitation
 that defines the next move.
 
-## v13.3-retrieval-rank-bias (2026-04-19, current)
+## v13.x-negative-findings (2026-04-19, current)
+
+**Headline:** after v13.3 shipped at 27.3 %, tested seven additional
+inference-time levers in one session. None improved on 27.3 %. All
+failures documented below so future sessions don't retread.
+
+All measured on same 300 SQuAD dev Q, seed 7, same retrieval stack,
+unless noted.
+
+| lever tested | result | why |
+|---|---|---|
+| bm25_weight sweep [0, 1] | peak 54.3 % r@1 @ w=0.9 (+1.3 pp, noise) | curve is flat [0.75, 1.0]; no static tweak breaks ~55 % r@1 |
+| `extract_answer` full-parent search | 6 hits @ 50Q vs chunk's 9, 5× slower | larger search space → distractors beat answers |
+| `retr_weight=3.0` at k=3 | ties v13.3's 27.3 % | weight=1.0 already near-optimal at k=3 |
+| `k_retrieve` sweep {3, 5, 7, 10} | monotonically WORSE (20→16→12→8 % @ 50Q) | more chunks = more distractor spans the MLP loses to |
+| PRF (prf_top=3..5, prf_terms=3..5) | regresses r@1 53 % → 37-28 % | expansion tokens come from top-N; if top-N wrong, PRF amplifies error |
+| disable MLP span scorer (fallback only) | 14 % @ 50Q (vs v13.3's 24 %) | MLP is doing real work, keep it |
+| top-K span concat (K=1..5) | flat K=1..5 in heuristic-only test | top spans cluster in same high-rarity region; need MLP integration for a real test |
+| qadapt v2 reranker (8K train, dev-eval) | tied static @ r@1 66.3 % conditional | dataset builder bug (s2=0) + signal 1 dominated — evolution correctly mode-collapsed |
+
+**What remains to try (bigger work, deferred):**
+- Retrain the `span_mlp` scorer with proper GENREG discipline: soft
+  log-prob fitness, mandatory energy, 80/20 train/dev, best-by-dev
+  checkpointing, early-stop on dev patience. Current MLP was trained
+  on 9.6K QA with hard fitness (per prior CHANGELOG). A proper v2
+  with 30K+ queries and soft fitness is plausible +3-5 pp territory.
+- Rebuild qadapt reranker with SEPARATED BM25 and dense signals per
+  hit (not just the pre-blended score). Current retrieve() computes
+  BM25 internally but doesn't expose it per-hit — needs a small API
+  addition.
+
+**Lesson (saved to /memory):** before running costly evolution on a
+reranker, verify the feature set has non-degenerate signals. If a
+single feature dominates, evolution correctly ignores the rest and
+just emulates the dominant feature's ranking.
+
+Scripts that produced these measurements (in repo root):
+  bench_blend_sweep.py  bench_k_sweep.py  bench_prf.py
+  bench_no_mlp.py       bench_topk_spans.py  bench_retr_w3.py
+  train_qadapt_v2.py    diagnose_misses.py
+
+## v13.3-retrieval-rank-bias (2026-04-19)
 
 **Headline:** bias `extract_answer`'s MLP stage 1 heuristic by the
 normalized retrieval score so spans from higher-confidence hits are
