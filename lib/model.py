@@ -815,6 +815,10 @@ class GenregLM:
         for h_idx, h in enumerate(hits):
             # For chunked retrieval, search spans within the matched
             # chunk (much more focused than the full parent).
+            # (Tried full-parent search v13.2 — 6 hits at 50Q vs
+            # chunk's 9, and 5x slower. Larger search space lets more
+            # distractor spans beat the answer under current heuristic.
+            # Reverted. Attacking wrong-chunk via better signal instead.)
             passage = h.get("chunk_token_ids") or h["token_ids"]
             # v13.1: graceful fallback when the passage has no query-rare
             # tokens. Previously this branch skipped the passage entirely,
@@ -900,8 +904,15 @@ class GenregLM:
                         qt = 0.0
                         if is_when and numeric > 0.5: qt = 3.0
                         elif is_when: qt = -0.8
+                        # v13.3: bias heur_sc by retrieval score so spans
+                        # from the higher-ranked retrieval hit score
+                        # higher. On 300 SQuAD dev Q, 36% of misses were
+                        # "wrong-parent" — right parent was in hits but
+                        # scorer picked a span from a different hit.
+                        # retr_score is [0,1] normalized across hits.
                         heur_sc = (rarity_sum + qt + inv_u_m + 0.5
-                                    - 0.05 * max(0, L_ - 5))
+                                    - 0.05 * max(0, L_ - 5)
+                                    + 1.0 * retr_score)
                         mlp_stage_spans.append({
                             "h_idx": h_idx,
                             "span": list(span),

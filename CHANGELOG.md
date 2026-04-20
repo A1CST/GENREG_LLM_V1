@@ -5,7 +5,54 @@ or AI) can tell at a glance what state the repo is in. Each version
 block includes the headline accuracy number and the honest limitation
 that defines the next move.
 
-## v13.1-empty-extraction-fix (2026-04-19, current)
+## v13.3-retrieval-rank-bias (2026-04-19, current)
+
+**Headline:** bias `extract_answer`'s MLP stage 1 heuristic by the
+normalized retrieval score so spans from higher-confidence hits are
+preferred when another hit has a high-rarity distractor span. Answer
+containment **25.0 % → 27.3 %** (+2.3 pp, +7 hits on 300 SQuAD dev Q).
+
+**Diagnosis that motivated this:** categorized the 225 v13.1 misses
+on 300 dev Q:
+
+```
+HIT                           75 (25.0 %)   # baseline
+MISS_NO_PASSAGE               91 (30.3 %)   # gold parent not in hits
+MISS_WRONG_PARENT            109 (36.3 %)   # right parent in hits,
+                                            # span picked from wrong hit
+MISS_SCORER_FAILURE_IN_CHUNK  25 ( 8.3 %)   # right hit, wrong span
+```
+
+**WRONG_PARENT was the biggest fixable bucket (36 %).** The scorer
+was picking a span from a wrong-parent chunk even when the right
+parent was also retrieved — a higher-rarity distractor span in a
+wrong chunk outweighed a less-flashy but-correct span in the right
+chunk.
+
+**Fix (one line):**
+```python
+heur_sc = (rarity_sum + qt + inv_u + 0.5 - 0.05 * max(0, L - 5)
+            + 1.0 * retr_score)           # <-- new
+```
+`retr_score` is the hit's normalized [0,1] retrieval score. Pushes
+the filter-K stage to prefer candidates from higher-confidence hits
+without overriding the MLP's ability to pick a lower-ranked hit when
+its spans are clearly better.
+
+**Also tried, reverted:**
+- v13.2: search full parent paragraph instead of matched 80-token
+  chunk. Result: 6 hits at 50Q (vs v13.1's 9), 5× slower. Larger
+  search space let distractor spans beat the answer under the
+  existing scoring. Conclusion: chunk bounding is load-bearing.
+
+**Biggest remaining lever:** the 30 % MISS_NO_PASSAGE bucket — the
+gold parent wasn't retrieved at all. Lives in retrieval, not
+extraction. The oracle-blend analysis in v11 showed ~7.7 pp of
+achievable recall@1 headroom via per-query-adaptive blending —
+retrain that with the protein-signal infrastructure in v11 and
+actually transfer-test on dev (v11's qadapt didn't generalize).
+
+## v13.1-empty-extraction-fix (2026-04-19)
 
 **Headline:** eliminated all 88 silent empty extractions from v13.
 Answer containment 23.7 % → **25.0 %** (+1.3 pp); empty-extraction

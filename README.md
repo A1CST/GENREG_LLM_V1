@@ -1,13 +1,13 @@
 # GENREG LM
 
-**Version: 2026-04-19 v13.1-empty-extraction-fix** —
+**Version: 2026-04-19 v13.3-retrieval-rank-bias** —
 retrieval recall@1 53.0 %, recall@3 68.0 %, **extractive answer
-containment 25.0 %** (up from 7.3 % at the pre-v13 `max_span=8`
-default — a 3.4× jump on the same model, no retraining). **Empty
-extractions eliminated (29.3 % → 0 %)**: every question now gets
-a concrete span, no silent failures. Generative RAG is superseded
-for QA — extractive beats it 4× on the same 300 questions.
-SQuAD v1.1 dev, seed 7. See `CHANGELOG.md` for the per-version path.
+containment 27.3 %** (up from 7.3 % at the pre-v13 `max_span=8`
+default — a 3.7× jump on the same model, no retraining). No empty
+extractions. Generative RAG is superseded for QA — extractive
+beats it 4.6× on the same 300 questions. SQuAD v1.1 dev, seed 7.
+See `CHANGELOG.md` for the per-version path and `diagnose_misses.py`
+for how the remaining 73 % misses break down.
 
 A chatbot-shaped language model trained **without gradient descent,
 without backpropagation, and without closed-form regression** against
@@ -17,8 +17,8 @@ counted directly from the corpus.
 
 Still a research artifact. **Output is now sentence-shaped and
 terminates naturally 75 – 85 % of the time**. With retrieval enabled
-and chunked extractive QA, factual accuracy is **~25.0 % on SQuAD dev**
-(up from 0.3 % no-RAG baseline — **83× lift**). See
+and chunked extractive QA, factual accuracy is **~27.3 % on SQuAD dev**
+(up from 0.3 % no-RAG baseline — **91× lift**). See
 `CHATBOT_V1_REPORT.md`, `RAG_V1_REPORT.md`, and `RAG_V2_REPORT.md`
 for the full build path and honest numbers.
 
@@ -74,11 +74,13 @@ If you came here expecting GPT-2, you are in the wrong repo.
   natural-stop rate), but it's still short-range. Don't expect
   multi-sentence paragraphs.
 - Topic can drift mid-response. No long-range memory, no multi-turn.
-- **Factual accuracy is ~25.0 %** on SQuAD dev via the extractive
-  path (up from 0.3 % without retrieval — **83× lift**). Most answers
-  are still wrong. Conditional extraction rate is ~36.8 % (when the
+- **Factual accuracy is ~27.3 %** on SQuAD dev via the extractive
+  path (up from 0.3 % without retrieval — **91× lift**). Most answers
+  are still wrong. Conditional extraction rate is ~40.1 % (when the
   correct passage IS retrieved, we still only pick the right span
-  36.8 % of the time). The span scorer is the biggest remaining gap.
+  40.1 % of the time). ~30 % of misses are retrieval failures
+  (gold parent not in top-3 hits) — that's the biggest remaining
+  lever and lives in the retrieval blend, not the extractor.
 - **Numbers and years now work** (v2 vocab extension), but long-tail
   proper nouns, foreign words, and special characters are still
   weak spots (~1.3 % of corpus is still `<unk>`).
@@ -149,8 +151,9 @@ from a less-pruned source.
 300 SQuAD v1.1 dev questions sampled with seed 7, top-k=3 retrieval,
 chunked retrieval index (46,586 chunks × 80 content tokens), tuned
 BM25 (k1=1.2, b=0.5, blend=0.85). **v13 unlocks extractive QA by
-raising the span window (`max_span` 8 → 100). v13.1 eliminates all
-empty extractions by relaxing the passage-filter.** No retraining.
+raising the span window (`max_span` 8 → 100). v13.1 eliminates empty
+extractions. v13.3 biases the span scorer by retrieval score so
+higher-confidence hits contribute higher-baseline spans.** No retraining.
 
 | metric | value |
 |---|---|
@@ -158,11 +161,27 @@ empty extractions by relaxing the passage-filter.** No retraining.
 | retrieval recall@3 | 68.0 % |
 | answer containment — no retrieval | 0.3 % |
 | answer containment — RAG generation (`generate_rag`) | 6.0 % |
-| answer containment — **extractive, v13.1** (`generate_qa`) | **25.0 %** |
-| conditional extraction (given recall@3 hit) | 36.8 % |
-| empty-extraction failure rate | 0 % (0/300 — was 29.3 % in v13) |
+| answer containment — **extractive, v13.3** (`generate_qa`) | **27.3 %** |
+| conditional extraction (given recall@3 hit) | 40.1 % |
+| empty-extraction failure rate | 0 % (0/300) |
 
-**~83× lift from retrieval** on answer containment (0.3 % → 25.0 %).
+**~91× lift from retrieval** on answer containment (0.3 % → 27.3 %).
+
+### Where the remaining 73 % of misses go
+
+Diagnosed on the same 300 questions with `diagnose_misses.py`:
+
+| category | count | share | what it means |
+|---|---|---|---|
+| HIT | 82 | 27.3 % | extr contains a gold answer string |
+| MISS — no passage retrieved | 91 | 30.3 % | gold parent NOT in top-3 — retrieval failure |
+| MISS — wrong parent picked | ~100 | ~33 % | right parent IS in top-3 but scorer picked a span from a different hit |
+| MISS — right chunk, wrong span | ~27 | ~9 % | pure scorer failure |
+
+The dominant remaining lever (30 %) is retrieval itself. The v11
+qadapt rerank showed +5 pp lift on train but didn't transfer to
+dev — that's the next candidate to rebuild with the protein-signal
+infrastructure and proper dev-set eval.
 Reproduce the numbers above with `python3 bench_rag.py --n-questions 300`
 (now includes an `extractive` column) or `python3 bench_span_sweep.py`
 for the full span-length sweep.
@@ -176,13 +195,13 @@ for the full span-length sweep.
 | 40 | 17.3 % (52/300) | 25.5 % |
 | 60 | 20.7 % (62/300) | 30.4 % |
 | **100 (v13 default)** | 23.7 % (71/300) | 34.8 % |
-| **100 + v13.1 passage-filter relax** | **25.0 % (75/300)** | **36.8 %** |
+| **100 + v13.1 passage-filter relax** | 25.0 % (75/300) | 36.8 % |
+| **100 + v13.3 retr_score bias** | **27.3 % (82/300)** | **40.1 %** |
 
 The old `max_span=8` default was often stopping the extractor one or
-two tokens before the gold answer. Raising it + the v13.1 passage-
-filter relaxation together yield **3.4× containment** with no
-retraining. Extractive QA also beats generative RAG by **4×** on the
-same 300 questions (25.0 % vs 6.0 %).
+two tokens before the gold answer. The v13.x stack together yields
+**3.7× containment** with no retraining. Extractive QA also beats
+generative RAG by **4.6×** on the same 300 questions (27.3 % vs 6.0 %).
 
 ### Annotated samples — when it works
 

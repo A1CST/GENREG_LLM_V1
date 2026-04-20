@@ -1,8 +1,8 @@
 {
   "stats": {
     "n": 300,
-    "hits": 75,
-    "misses": 225,
+    "hits": 82,
+    "misses": 218,
     "empty": 0
   },
   "hits": [
@@ -13,9 +13,9 @@
       "is_empty": false
     },
     {
-      "q": "What was increased in November 2011?",
-      "gold": "the capacity of the Tyne Tunnel",
-      "extr": "renumbered , with many city centre roads changing from to their present numbers . in november 2011 the capacity of the tyne tunnel was increased when project to build second road tunnel and refurbish .",
+      "q": "From which period did the objects in the Soulages collection come from?",
+      "gold": "Italian and French Renaissance",
+      "extr": "v&a is the most comprehensive holding of post-classical european sculpture in the world . there are approximately 22,000 objects in the collection that cover the period from about 400 ad to 1914 . this covers among other periods byzantine and anglo saxon ivory sculptures , british , french and spanish medieval statues and carvings , the renaissance , baroque , , victorian and art nouveau .",
       "is_empty": false
     },
     {
@@ -25,15 +25,15 @@
       "is_empty": false
     },
     {
-      "q": "What molecule does the Sun have in higher proportion than Earth?",
-      "gold": "oxygen-16",
-      "extr": "crashed genesis spacecraft has shown that the sun has higher proportion of oxygen-16 than does the earth . the measurement implies that an unknown process depleted oxygen-16 from the sun's disk of protoplanetary material prior to the of dust grains .",
+      "q": "Who claimed that the name Black Death first appeared in 1631?",
+      "gold": "Gasquet",
+      "extr": "gasquet 1908 claimed that the latin name black death for the 14th-century epidemic first appeared in modern times in 1631 in book on danish history by . ab mortem . commonly and from its effects , they called it the black death . the name spread through scandinavia and then germany , gradually becoming attached to the mid 14th-century epidemic as proper name . in england , it was not until 1823 that the medieval epidemic .",
       "is_empty": false
     },
     {
-      "q": "How many times did plague occur in Venice?",
-      "gold": "22 times between 1361 and 1528",
-      "extr": "1350 to 1490 . plague epidemics ravaged london in 1563 , 1593 , 1603 , 1625 , 1636 , and 1665 , reducing its population by 10 to 30 during those years . over 10 of population died in , and again in , 1655 , and 1664 . plague occurred in venice 22 times between and 1528 . the plague of killed 50,000 in venice , almost third of the population . late outbreaks .",
+      "q": "What is providing support networks considered to be?",
+      "gold": "Organizational interventions",
+      "extr": "mitigate the occupational hazards of teaching . organizational interventions , like changing teachers schedules , providing support networks and mentoring , changing the work environment , and offering promotions and bonuses , may be effective in helping to reduce occupational stress among teachers . interventions , including training and counseling , are also used to relieve occupational .",
       "is_empty": false
     },
     {
@@ -47,7 +47,7 @@
     {
       "q": "What was Isiah Bowman nick name, as known by the public.",
       "gold": "Wilson's geographer",
-      "extr": "bird migration routes have been studied by variety of techniques including the oldest , marking . swans have been marked with nick on the beak since about 1560 in england . scientific ringing was pioneered by hans christian cornelius mortensen in 1899 . other techniques include radar and satellite tracking .",
+      "extr": "geographer named isiah bowman . bowman was the director of the american geographical society in 1914 . three years later in 1917 , he was appointed to then president woodrow wilson's inquiry in 1917 . the inquiry was the idea of president wilson and the american delegation from the paris peace conference . the point of this inquiry was to build premise .",
       "is_empty": false
     },
     {
@@ -57,15 +57,15 @@
       "is_empty": false
     },
     {
-      "q": "What offers a conceptual definition of force?",
-      "gold": "Newtonian mechanics",
-      "extr": "subscribed to notion of philosophy as the conceptual clarification of the methods , insights and discoveries of the sciences . they saw in the logical symbolism elaborated by and bertrand russell powerful instrument that could rationally reconstruct all scientific discourse into an ideal , logically perfect , language that would be free of the ambiguities and of natural language . this gave rise to what they saw as metaphysical and other conceptual . by combining thesis .",
+      "q": "What was the name of the first Doctor Who radio drama?",
+      "gold": "Slipback",
+      "extr": "actresses who appeared in doctor who also star in the series eve myles as gwen cooper , who also played the similarly named servant girl gwyneth in the 2005 doctor who episode the dead , and naoko mori who reprised her role as toshiko sato first seen in aliens of london . second series of torchwood aired in 2008 for three episodes , the cast was joined by reprising .",
       "is_empty": false
     },
     {
-      "q": "How many Victorians are non-religious?",
-      "gold": "20%",
-      "extr": "decimal 106 . ascii includes definitions for 128 characters 33 are control characters many now obsolete that affect how text and space are processed .",
+      "q": "What was Ban Ki-Moon the Secretary General of?",
+      "gold": "the United Nations",
+      "extr": "politics u.n . secretary general ban ki-moon american political leaders john hancock , john adams , john quincy adams , rutherford . hayes , theodore roosevelt , franklin . roosevelt , john . kennedy , al gore , george . bush and barack obama chilean president colombian president juan manuel santos costa rican president mexican presidents felipe , carlos salinas de and miguel de la madrid mongolian president peruvian president alejandro toledo taiwanese president ma canadian governor general david lloyd .",
       "is_empty": false
     }
   ],
