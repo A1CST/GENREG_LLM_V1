@@ -816,18 +816,29 @@ class GenregLM:
             # For chunked retrieval, search spans within the matched
             # chunk (much more focused than the full parent).
             passage = h.get("chunk_token_ids") or h["token_ids"]
+            # v13.1: graceful fallback when the passage has no query-rare
+            # tokens. Previously this branch skipped the passage entirely,
+            # producing empty extractions ~29% of the time on SQuAD dev
+            # whenever a query used only common words or vocab mismatched.
             hit_positions = [i for i, t in enumerate(passage)
                               if t in q_content_rare]
             if not hit_positions:
-                continue
+                # Fall back to any query content token, rare filter relaxed
+                hit_positions = [i for i, t in enumerate(passage)
+                                  if t in q_content]
+            content_idx = [i for i, t in enumerate(passage)
+                            if t not in STRUCTURAL
+                            and (t >= CHAR_CUTOFF or t in self._ALLOWED_PUNCT_IDS)]
+            if not hit_positions:
+                # Passage shares no content tokens with the query at all.
+                # Rather than skipping (returning empty), treat every content
+                # position as equally eligible so the scorer can still pick
+                # a best-effort span based on qtype / rarity features.
+                hit_positions = list(content_idx) or [0]
             dists = []
             for i in range(len(passage)):
                 d = min(abs(i - p) for p in hit_positions)
                 dists.append(d)
-
-            content_idx = [i for i, t in enumerate(passage)
-                            if t not in STRUCTURAL
-                            and (t >= CHAR_CUTOFF or t in self._ALLOWED_PUNCT_IDS)]
 
             for L in range(min_span, max_span + 1):
                 for ci_start in range(len(content_idx) - L + 1):

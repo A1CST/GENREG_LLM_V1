@@ -1,14 +1,13 @@
 # GENREG LM
 
-**Version: 2026-04-19 v13-span-length-unlock** —
+**Version: 2026-04-19 v13.1-empty-extraction-fix** —
 retrieval recall@1 53.0 %, recall@3 68.0 %, **extractive answer
-containment 23.7 %** (up from 7.3 % at the previous max_span=8
-default — a 3.2× jump on the same model, same data, no retraining).
-Conditional conversion of retrieval@3 → answer rose 10.8 % → 34.8 %.
-Generative RAG is superseded for QA — extractive with max_span=100
-beats it 4×.
-SQuAD v1.1 dev, 300-q sample, seed 7. See `CHANGELOG.md` for the
-full version history.
+containment 25.0 %** (up from 7.3 % at the pre-v13 `max_span=8`
+default — a 3.4× jump on the same model, no retraining). **Empty
+extractions eliminated (29.3 % → 0 %)**: every question now gets
+a concrete span, no silent failures. Generative RAG is superseded
+for QA — extractive beats it 4× on the same 300 questions.
+SQuAD v1.1 dev, seed 7. See `CHANGELOG.md` for the per-version path.
 
 A chatbot-shaped language model trained **without gradient descent,
 without backpropagation, and without closed-form regression** against
@@ -18,8 +17,8 @@ counted directly from the corpus.
 
 Still a research artifact. **Output is now sentence-shaped and
 terminates naturally 75 – 85 % of the time**. With retrieval enabled
-and chunked extractive QA, factual accuracy is **~23.7 % on SQuAD dev**
-(up from 0.3 % no-RAG baseline — **79× lift**). See
+and chunked extractive QA, factual accuracy is **~25.0 % on SQuAD dev**
+(up from 0.3 % no-RAG baseline — **83× lift**). See
 `CHATBOT_V1_REPORT.md`, `RAG_V1_REPORT.md`, and `RAG_V2_REPORT.md`
 for the full build path and honest numbers.
 
@@ -75,11 +74,11 @@ If you came here expecting GPT-2, you are in the wrong repo.
   natural-stop rate), but it's still short-range. Don't expect
   multi-sentence paragraphs.
 - Topic can drift mid-response. No long-range memory, no multi-turn.
-- **Factual accuracy is ~23.7 %** on SQuAD dev via the extractive
-  path (up from 0.3 % without retrieval — **79× lift**). Most answers
-  are still wrong. Conditional extraction rate is ~34.8 % (when the
+- **Factual accuracy is ~25.0 %** on SQuAD dev via the extractive
+  path (up from 0.3 % without retrieval — **83× lift**). Most answers
+  are still wrong. Conditional extraction rate is ~36.8 % (when the
   correct passage IS retrieved, we still only pick the right span
-  34.8 % of the time). The span scorer is the biggest remaining gap.
+  36.8 % of the time). The span scorer is the biggest remaining gap.
 - **Numbers and years now work** (v2 vocab extension), but long-tail
   proper nouns, foreign words, and special characters are still
   weak spots (~1.3 % of corpus is still `<unk>`).
@@ -150,7 +149,8 @@ from a less-pruned source.
 300 SQuAD v1.1 dev questions sampled with seed 7, top-k=3 retrieval,
 chunked retrieval index (46,586 chunks × 80 content tokens), tuned
 BM25 (k1=1.2, b=0.5, blend=0.85). **v13 unlocks extractive QA by
-raising the span window — `max_span` default 8 → 100 — no retraining.**
+raising the span window (`max_span` 8 → 100). v13.1 eliminates all
+empty extractions by relaxing the passage-filter.** No retraining.
 
 | metric | value |
 |---|---|
@@ -158,11 +158,11 @@ raising the span window — `max_span` default 8 → 100 — no retraining.**
 | retrieval recall@3 | 68.0 % |
 | answer containment — no retrieval | 0.3 % |
 | answer containment — RAG generation (`generate_rag`) | 6.0 % |
-| answer containment — **extractive, v13 default** (`generate_qa`) | **23.7 %** |
-| conditional extraction (given recall@3 hit) | 34.8 % |
-| empty-extraction failure rate | 29.3 % (88/300) |
+| answer containment — **extractive, v13.1** (`generate_qa`) | **25.0 %** |
+| conditional extraction (given recall@3 hit) | 36.8 % |
+| empty-extraction failure rate | 0 % (0/300 — was 29.3 % in v13) |
 
-**~79× lift from retrieval** on answer containment (0.3 % → 23.7 %).
+**~83× lift from retrieval** on answer containment (0.3 % → 25.0 %).
 Reproduce the numbers above with `python3 bench_rag.py --n-questions 300`
 (now includes an `extractive` column) or `python3 bench_span_sweep.py`
 for the full span-length sweep.
@@ -175,12 +175,14 @@ for the full span-length sweep.
 | 20 | 12.3 % (37/300) | 18.1 % |
 | 40 | 17.3 % (52/300) | 25.5 % |
 | 60 | 20.7 % (62/300) | 30.4 % |
-| **100 (v13 default)** | **23.7 % (71/300)** | **34.8 %** |
+| **100 (v13 default)** | 23.7 % (71/300) | 34.8 % |
+| **100 + v13.1 passage-filter relax** | **25.0 % (75/300)** | **36.8 %** |
 
 The old `max_span=8` default was often stopping the extractor one or
-two tokens before the gold answer. A single-line fix yields 3.2×
-containment with no retraining. Extractive QA also beats generative
-RAG by **4×** on the same 300 questions (23.7 % vs 6.0 %).
+two tokens before the gold answer. Raising it + the v13.1 passage-
+filter relaxation together yield **3.4× containment** with no
+retraining. Extractive QA also beats generative RAG by **4×** on the
+same 300 questions (25.0 % vs 6.0 %).
 
 ### Annotated samples — when it works
 
@@ -253,21 +255,22 @@ aware features, or a genuinely retrieval-specialized encoder — see
 the v12 entry in `CHANGELOG.md` for why the LM-trained attention
 stack is *not* that encoder).
 
-**(3) Empty extraction** (88/300, 29.3 % of questions):
+**(3) Empty extraction — FIXED in v13.1** (was 88/300 = 29.3 % in v13,
+now 0/300).
 
-```
-Q: When did France take control of Algeria?
-gold: "1830"
-extr: ""
+Root cause: `extract_answer` skipped any retrieved passage with no
+"rare content token" (SIF weight > 0.3) matching the query. If all
+three hits failed this filter, zero spans were scored. v13.1 relaxes
+the filter with a fallback chain: `rare_content_match → any_content_match
+→ all_content_positions`, so every question now produces a concrete
+span.
 
-Q: Who claimed that the name Black Death first appeared in 1631?
-gold: "Gasquet"
-extr: ""
-```
-`extract_answer` returns empty when no span scores above its
-acceptance threshold. The threshold is over-conservative — relaxing
-it (always return the top-scoring span even if low-confidence) is a
-likely +5 pp win that hasn't been measured yet.
+Honest measured delta from this fix was **+1.3 pp** (not the +5 pp
+the v13 note speculated). Most previously-empty cases were retrieval
+failures in disguise — the correct passage wasn't in top-3 hits
+anyway, so surfacing a best-effort span just reclassifies "empty
+miss" as "wrong-span miss". Still ships because silent failures are
+a bad UX and the 4 new hits are real.
 
 ---
 

@@ -5,7 +5,44 @@ or AI) can tell at a glance what state the repo is in. Each version
 block includes the headline accuracy number and the honest limitation
 that defines the next move.
 
-## v13-span-length-unlock (2026-04-19, current)
+## v13.1-empty-extraction-fix (2026-04-19, current)
+
+**Headline:** eliminated all 88 silent empty extractions from v13.
+Answer containment 23.7 % → **25.0 %** (+1.3 pp); empty-extraction
+rate 29.3 % → **0 %**. Same 300 SQuAD dev, same retrieval.
+
+**Root cause:** `extract_answer` skipped any retrieved passage that
+contained no "rare query content tokens" (SIF weight > 0.3). If
+all three retrieved passages failed this filter, no spans were
+scored at all and `best` remained `("", [], {})`. Queries using
+only common words, or passages with vocabulary mismatch against
+the query, hit this silently.
+
+**Fix:** graceful fallback in `extract_answer`:
+1. If no rare-content query tokens match the passage, fall back to
+   the full query-content set.
+2. If still no matches, treat every content position as eligible so
+   the scorer can pick a best-effort span from passage features
+   (qtype bonus, rarity, numeric-ness, etc.).
+
+**Reality check on predicted gain:** the README comment on v13 guessed
+"+5 pp" from this fix. Actual is +1.3 pp. The 88 empty cases were
+mostly retrieval failures — the correct passage genuinely wasn't
+in the top-3 hits, so surfacing *any* span just converts
+empty-miss into wrong-span-miss. Only 4 of the 88 previously-empty
+cases turn into correct answers.
+
+**Why it still ships:** zero silent failures. Every question now
+gets a concrete span you can evaluate and trace — no ambiguity
+between "scorer gave up" and "scorer returned garbage." The
+diagnostic value matters more than the 1.3 pp.
+
+**What's left:** next lever remains the wrong-span-in-correct-
+passage case (~100/300 questions) — the scorer picks a span with
+query-word lexical overlap but no answer overlap. A better
+start-position classifier attacks this directly.
+
+## v13-span-length-unlock (2026-04-19)
 
 **Headline:** the shipped `max_span=8` default in `extract_answer` /
 `generate_qa` was cutting off answers before the gold span ended.
