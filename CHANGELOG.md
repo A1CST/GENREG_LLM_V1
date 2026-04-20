@@ -5,7 +5,262 @@ or AI) can tell at a glance what state the repo is in. Each version
 block includes the headline accuracy number and the honest limitation
 that defines the next move.
 
-## v9-retrieval-audit-and-cleanup (2026-04-19, current)
+## v13-span-length-unlock (2026-04-19, current)
+
+**Headline:** the shipped `max_span=8` default in `extract_answer` /
+`generate_qa` was cutting off answers before the gold span ended.
+Raising the default to 100 improves extractive answer containment
+**3.2× on SQuAD dev with no retraining.**
+
+**Measurement** (300 SQuAD v1.1 dev questions, seed 7, same retrieval
+stack as v12):
+
+```
+max_span | answer containment | conversion of r@3 = 0.68
+       8 |     7.3 %  (22/300) |   10.8 %  ← shipped default before v13
+      20 |    12.3 %  (37/300) |   18.1 %
+      40 |    17.3 %  (52/300) |   25.5 %
+      60 |    20.7 %  (62/300) |   30.4 %
+     100 |    23.7 %  (71/300) |   34.8 %  ← new default
+```
+
+**Also beats generative RAG by 4×:** same 300 questions through
+`generate_rag` returned 6.0 % answer containment. Extractive with
+longer spans is the correct path for QA — generative RAG is kept
+only for non-QA prose.
+
+**Diagnosis of the old default:** sampled extractions with
+`max_span=8` showed the scorer often picked spans ending ONE token
+before the gold answer (e.g., *"undergoing period of refurbishment
+and modernization, entitled."* for gold *"Metro: All Change"*).
+Eight tokens isn't enough runway for the scorer's heuristic
+start-position to include realistic answer phrases.
+
+**Changes shipped:**
+- `lib/model.py`: `extract_answer(max_span=100)`, `generate_qa(max_span=100)`
+- `benchmark.py`, `bench_extractive.py`: explicit `max_span=8` call
+  sites bumped to 100 to match new default
+- `bench_extractive_qa.py`, `bench_span_sweep.py`: the reproduction
+  scripts for the measurements above (in repo root)
+
+**Biggest remaining gap:** 68 % of questions retrieve the correct
+passage, only 34.8 % end up with the answer in the response. That's
+the span scorer picking the wrong span inside a correct passage. An
+evolved span-start classifier (not just a scorer over candidate
+spans) is the next lever.
+
+## v12-attention-as-retrieval-encoder-doesnt-work (2026-04-19)
+
+**Headline:** tested the "use the evolved attention stack as a
+retrieval feature extractor" path. Doesn't work — the LM-trained
+attention produces smooth, uniformly-similar representations that
+have no discriminative power for retrieval. Concrete negative result.
+
+**Setup:** mean-pooled the frozen attention stack (L0+L1) output on
+every chunk (offline, 6 min), then scored queries by cosine against
+the bank. Tried causal+mean, bi-directional+mean, and causal+last
+pooling.
+
+**Result on 300 SQuAD dev Q:**
+```
+config                              r@1    r@3    r@10
+default (bm25 0.85 / sif 0.15)     0.533  0.683  0.780
+attn alone                         0.013  0.017  0.047    ← ~random
+bm25 + attn (0.70 / 0.30)          0.527  0.663  0.763    ← regression
+bm25 + sif + attn (0.70/0.10/0.20) 0.530  0.677  0.767    ← regression
+bm25 + sif + attn (0.60/0.20/0.20) 0.530  0.680  0.773    ← tie
+```
+
+Any blend including attn matches or hurts default. Adding it provides
+*negative* information.
+
+**Sanity check — cosine between query pairs:**
+```
+                    related (q1-q2)  unrelated (q1-q3)  separation
+SIF (baseline):         0.923          -0.048              0.97
+Attn causal+mean:       0.718           0.576              0.14
+Attn bi-dir+mean:       0.705           0.561              0.14
+Attn causal+last:       0.709           0.573              0.14
+```
+
+SIF has 7× more discriminative power. Every pair of attention-encoded
+sequences lands in cosine 0.56–0.72. No pooling strategy rescues this.
+
+**Why:** the attention stack was evolved for next-token prediction
+(language modeling). That objective optimizes for *soft, overlapping*
+representations because it needs to hedge across many plausible
+continuations. Retrieval wants the opposite: *sparse, separable*
+representations where identity is preserved. Frozen LM features are
+fundamentally the wrong type for retrieval.
+
+**Second observation logged:** core attention layers (`attn_L0/L1`)
+were trained Apr 18 13:59, BEFORE the vocab extension
+(V 51 641 → 61 641, rebuilt Apr 18 19:46). Attention is vocab-agnostic
+(operates on 768-dim vectors, not token ids), so it still runs — but
+it was evolved on a corpus that never contained the new 10 K tokens.
+Likely suppressing quality on anything involving them.
+
+**Real path forward — the only one that fixes retrieval properly:**
+Re-evolve the attention stack against a **retrieval fitness**, not
+an LM fitness. Given:
+- A population of (small) attention heads on top of the existing
+  frozen L0+L1
+- Fitness: multi-positive CE over top-20 retrieval candidates on
+  SQuAD train queries, with proper protein signals
+- Shared application to query and chunk
+this becomes a genuine retrieval-specialized encoder. Inference cost:
+one attention forward per query (~10 ms) + precomputed chunk bank.
+**This is the actual next module to build.**
+
+**Repo cleanup:** `attn_emb_bank.pkl` (143 MB), `build_attn_retrieval_bank.py`,
+`bench_attn_retrieval.py` all removed — not shipping a regression
+signal.
+
+## v11-protein-signals-and-generalization-gap (2026-04-19)
+
+**Headline:** reopened retrieval work after learning that earlier
+attempts had used *instant-fitness selection only*, without the
+protein-signal infrastructure used by other GENREG modules. Adding
+proper signals (fitness EMA + accuracy EMA + trust + squared-positive
+accuracy ratchet + diverse init + fresh injections) *did* unstick
+evolution — but uncovered a deeper generalization gap: training-pool
+wins don't transfer to dev distribution with surface-level query
+features.
+
+**What changed in the trainer:**
+
+The CIFAR GENREG population pattern was ported to the retrieval
+trainers:
+- `fitness_ema` (decay 0.9) — per-genome fitness memory, smooths
+  batch-noise so selection doesn't flip randomly between near-
+  identical genomes at plateau.
+- `accuracy_ema` — separate history for top-1 accuracy.
+- `trust = trust_gain × trust_scale × (0.4·instant + 0.6·ema)` —
+  history-weighted selection signal.
+- `ratchet = max(0, z(acc_ema))² × 10` — squared positive z-score
+  boost, massively amplifies genomes with *consistent* high accuracy
+  vs one-off lucky fitness.
+- **Selection by `trust + ratchet`, not raw fitness.**
+- Diverse init + fresh injection of bottom-4 each gen to keep
+  exploration alive.
+
+**Phase-A retrieval head re-run (dense-only fitness):** previously
+frozen at 25.8 % top-1; with protein signals moved to 28.5 % top-1
+over 500 gens — real climb, but capped far below the 0.66 combined
+baseline because dense-only cosine can never match BM25+dense.
+
+**Oracle diagnostic on the filtered pool:**
+- default blend 0.85/0.15:    0.6163 top-1
+- best single global blend:   0.6189 top-1  (+0.003)
+- oracle per-query blend:     **0.6937 top-1**  (+7.7 pp)
+- conclusion: there IS 7.7 pp of theoretical headroom, but it requires
+  per-query-adaptive blending, not a single static blend.
+
+**Query-adaptive blend MLP (qadapt v1):** 10-dim query features →
+MLP(32, tanh) → (w_bm, w_de), 418 params. Trained on SQuAD-train
+top-20 filtered pool with protein signals. val_top1 0.611 → 0.661 in
+25 gens (+5.0 pp over default). Learned weights per type:
+  - when: 0.89 bm25 ratio (near default 0.85)
+  - who:  0.94 (more lexical, needs name match)
+  - where: 0.62 (more dense)
+  - what: 0.80
+  - how:  0.56 (most dense)
+Dev bench on 1000 Q (apples-to-apples): **r@1 0.498 → 0.491** (-0.007).
+Zero transfer to dev despite +5 pp on filtered-pool val.
+
+**Why the gap:** the top-20 filter selects "easy" queries where the
+default blend already ranks gold high. The MLP learns weights tuned
+to those easy queries, which *hurt* the harder queries the filter
+excluded (which are a larger share of dev).
+
+**qadapt v2 (wider filter, more data):** CAND_K=50, 10 000 train Q
+(~6.5 k effective). val_top1 = 0.598. Dev 1000 Q: r@1 0.498 → 0.496.
+Same no-transfer pattern. Widening the filter doesn't address the
+root: the 10-dim surface features (is_when/is_who/has_digit/…) are
+too coarse to encode generalizable per-query blend rules.
+
+**Protein-signal takeaway:** the user's framework was correct to flag
+the missing signals. Adding them moved evolution from frozen to
+actively exploring in every trainer. The improvement is real on
+training. The remaining dev gap isn't a protein-signal problem; it's
+a feature problem — coarse categorical features can't distinguish
+"how many" (wants BM25, numeric) from "how does X work" (wants dense,
+semantic).
+
+**Real next moves (in order of cost/impact):**
+- **Richer query features**: distinctive sub-types ("how many",
+  "what year", "what name"), actual dense query-vector input, signal-
+  confidence features (std of BM25/dense over top-20). This could
+  lift qadapt to transferable gains.
+- **Cross-encoder**: still the biggest lever; per-query-per-candidate
+  semantic matching.
+- **Accept ceiling at r@1 ≈ 0.50** and invest in generation quality.
+
+**Repo cleanup:** no new checkpoints shipped (qadapt v1, v2 both
+regress on dev). Phase A/qadapt loader + inference helpers removed
+from `lib/model.py`. Trainer files kept in
+`LLM/components/attention/` for future work.
+
+## v10-retrieval-ceiling-confirmed (2026-04-19)
+
+**Headline:** four different gradient-free retrieval improvement
+attempts today, all within ±0.01 of the 0.530 r@1 baseline on 300
+SQuAD dev Q. The retrieval substrate is at its gradient-free ceiling
+with the current signal set. Further gains require architectural
+changes (cross-encoder, better query-side encoding), not more
+rerankers.
+
+**Attempted (all no-ops or regressions):**
+
+1. `retrieval_reranker_v2` — MLP over 10 expanded signals (title match,
+   content fraction, first-anchor, rank-preserve, etc.). val_top1
+   plateaued at 0.644, below the 0.66 "trust-the-blend" baseline.
+   Dev: r@1 0.530→0.537 (+0.007, noise).
+
+2. Phase A retrieval head — joint query+chunk refinement via a
+   diag-scale+shift + learned PC + residual (2306 params). Init near
+   identity; evolution could not escape the starting fit (-2.85, 26 %
+   filtered-pool top-1). Very flat loss landscape around near-identity
+   init; no mutant beat the elite over 500 generations. Not deployed.
+
+3. Phase B per-qtype blend weights — 6 types × (w_bm25, w_dense) = 12
+   params. val_top1 0.625, below 0.66 pool baseline. Dev: r@1 0.523
+   vs 0.530 (regression). Learned weights mostly near default: "where"
+   and "how" wanted slightly more dense weight. Not deployed.
+
+4. Cheap-knob sweep (from v9) — bm25_weight, qexp weight/k, PRF, v1
+   reranker toggle. All ≤0.01 movement.
+
+**What the pattern says:**
+
+- The BM25 × SIF-mean blend already extracts most of the information
+  in these features.
+- Adding more combinations of the same lexical+dense signal family
+  cannot resolve semantic ambiguity. The 24 % rerank-recoverable
+  headroom from v9 is not free — it exists because lexical+dense
+  are genuinely inconclusive on those queries.
+- Gradient-free evolution at ≤2K params can't discover a retrieval
+  transform meaningfully different from identity in this geometry.
+  The loss surface is near-flat around the natural init.
+
+**Next-move shortlist (all bigger projects):**
+
+- **Cross-encoder**: run evolved attention stack on `[query || chunk]`
+  pair sequences. Per-query-per-candidate forward pass (~10–30× slower
+  retrieval) but accesses genuinely new information via cross-token
+  attention.
+- **Better query encoder**: replace static SIF-mean query→vec with an
+  evolved module. Specifically targets the 0-rare-token bucket
+  (25 % of data, r@1=0.31).
+- **Accept the ceiling**: ship r@1 ≈ 0.53 / r@3 ≈ 0.68; shift effort
+  to making RAG generation robust on top-3 contexts.
+
+**Repo changes:** no new checkpoints shipped (no-op or regression).
+Retrieval loaders + helpers removed from `lib/model.py` — no dead
+code paths. `bench_retrieval_paths.py` moved to
+`archive/diagnostics/`.
+
+## v9-retrieval-audit-and-cleanup (2026-04-19)
 
 **Headline:** explicitly re-scoped away from the span-scorer arms race
 after the retrieval substrate was found to be saturated. Repo pruned

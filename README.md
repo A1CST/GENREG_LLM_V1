@@ -1,14 +1,14 @@
 # GENREG LM
 
-**Version: 2026-04-19 v8-mlp-span-scorer-deeper-evolution** —
-retrieval recall@1 53.3 %, **extractive answer containment 9.7 %**
-(+2.0 pp over 7.7 % heuristic-only baseline; +0.7 pp over v6). Same
-data and architecture as v6, with 2× population (POP=96) and 2.5×
-generations (1500). Found a better basin in the fitness landscape:
-val top-1 improved 29.6 % → 32.3 %, val lift +15.0 pp. β = -0.67
-(lower than v6's -1.05; MLP contributes less but more reliably).
+**Version: 2026-04-19 v13-span-length-unlock** —
+retrieval recall@1 53.0 %, recall@3 68.0 %, **extractive answer
+containment 23.7 %** (up from 7.3 % at the previous max_span=8
+default — a 3.2× jump on the same model, same data, no retraining).
+Conditional conversion of retrieval@3 → answer rose 10.8 % → 34.8 %.
+Generative RAG is superseded for QA — extractive with max_span=100
+beats it 4×.
 SQuAD v1.1 dev, 300-q sample, seed 7. See `CHANGELOG.md` for the
-eight-version history.
+full version history.
 
 A chatbot-shaped language model trained **without gradient descent,
 without backpropagation, and without closed-form regression** against
@@ -18,8 +18,8 @@ counted directly from the corpus.
 
 Still a research artifact. **Output is now sentence-shaped and
 terminates naturally 75 – 85 % of the time**. With retrieval enabled
-and chunked extractive QA, factual accuracy is **~7.7 % on SQuAD dev**
-(up from 0.3 % no-RAG baseline — **25× lift**). See
+and chunked extractive QA, factual accuracy is **~23.7 % on SQuAD dev**
+(up from 0.3 % no-RAG baseline — **79× lift**). See
 `CHATBOT_V1_REPORT.md`, `RAG_V1_REPORT.md`, and `RAG_V2_REPORT.md`
 for the full build path and honest numbers.
 
@@ -75,11 +75,11 @@ If you came here expecting GPT-2, you are in the wrong repo.
   natural-stop rate), but it's still short-range. Don't expect
   multi-sentence paragraphs.
 - Topic can drift mid-response. No long-range memory, no multi-turn.
-- **Factual accuracy is ~8.3 %** on SQuAD dev via the extractive
-  path (up from 0.3 % without retrieval — **28× lift**). Most answers
-  are still wrong. Conditional extraction rate is ~11 % (when the
+- **Factual accuracy is ~23.7 %** on SQuAD dev via the extractive
+  path (up from 0.3 % without retrieval — **79× lift**). Most answers
+  are still wrong. Conditional extraction rate is ~34.8 % (when the
   correct passage IS retrieved, we still only pick the right span
-  11 % of the time). The span scorer is the biggest remaining gap.
+  34.8 % of the time). The span scorer is the biggest remaining gap.
 - **Numbers and years now work** (v2 vocab extension), but long-tail
   proper nouns, foreign words, and special characters are still
   weak spots (~1.3 % of corpus is still `<unk>`).

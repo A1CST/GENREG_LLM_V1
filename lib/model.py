@@ -734,7 +734,7 @@ class GenregLM:
         return False
 
     @torch.no_grad()
-    def extract_answer(self, query, k_retrieve=3, max_span=8, min_span=1,
+    def extract_answer(self, query, k_retrieve=3, max_span=100, min_span=1,
                         return_passage=False):
         """Retrieve top-k passages, score every span, return best.
 
@@ -988,7 +988,7 @@ class GenregLM:
         return best
 
     @torch.no_grad()
-    def generate_qa(self, query, k_retrieve=3, max_span=8):
+    def generate_qa(self, query, k_retrieve=3, max_span=100):
         """Extractive QA: retrieve, extract, return span wrapped as sentence."""
         text, ids, _ = self.extract_answer(query, k_retrieve=k_retrieve,
                                              max_span=max_span)

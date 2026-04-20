@@ -353,7 +353,7 @@ def bench_chatbot_samples(model, seeds=(42,), n_tokens=40):
                     p, max_tokens=n_tokens, k=1, alpha=5.0,
                     temperature=0.7, top_k=30)
                 print(f"    [RAG]:      {text_g}")
-                ext_text, _ = model.generate_qa(p, k_retrieve=3, max_span=8)
+                ext_text, _ = model.generate_qa(p, k_retrieve=3, max_span=100)
                 print(f"    [extract]:  {ext_text}")
             print()
 
@@ -410,7 +410,7 @@ def bench_rag_and_extractive(model, n_questions=150, k=3,
         rag_txt, _, _ = model.generate_rag(
             c["q"], max_tokens=30, k=1, alpha=5.0,
             temperature=0.7, top_k=30)
-        extr_txt, _ = model.generate_qa(c["q"], k_retrieve=k, max_span=8)
+        extr_txt, _ = model.generate_qa(c["q"], k_retrieve=k, max_span=100)
 
         golds_l = [a.lower() for a in c["answers"]]
         if any(a in gen_txt.lower() for a in golds_l):

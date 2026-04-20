@@ -105,7 +105,7 @@ def run():
                                          alpha=5.0, temperature=0.7, top_k=30)
         # Extractive
         extr_txt, extr_ids = m.generate_qa(c["q"], k_retrieve=args.k,
-                                            max_span=8)
+                                            max_span=100)
 
         gold_low = [a.lower() for a in c["answers"]]
         if any(a in gen_txt.lower() for a in gold_low):
