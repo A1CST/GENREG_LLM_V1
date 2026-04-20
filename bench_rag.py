@@ -69,6 +69,7 @@ def run():
     retrieve_topk = 0
     answer_in_response = 0
     answer_in_response_rerank = 0
+    answer_in_response_extr = 0
     log_lines = []
 
     torch.manual_seed(42)
@@ -99,6 +100,12 @@ def run():
         if any(a in text_rl for a in answers):
             answer_in_response_rerank += 1
 
+        # Extractive QA (v13 default: max_span=100)
+        text_e, _ = m.generate_qa(c["q"], k_retrieve=args.k)
+        text_el = text_e.lower()
+        if any(a in text_el for a in answers):
+            answer_in_response_extr += 1
+
         if i < 10:
             line = (f"Q: {c['q']}\n"
                     f"  gold: {c['answers'][0]!r}\n"
@@ -106,7 +113,9 @@ def run():
                     f"score={hits[0]['score']:.3f}\n" if hits else f"Q: {c['q']}\n"
                     f"  gold: {c['answers'][0]!r}\n"
                     f"  no hits\n")
-            line += f"  RAG reply: {text}\n  no-RAG reply: {text_r}\n"
+            line += (f"  RAG reply: {text}\n"
+                     f"  no-RAG reply: {text_r}\n"
+                     f"  extractive: {text_e}\n")
             print(line, flush=True)
             log_lines.append(line)
 
@@ -116,7 +125,8 @@ def run():
                   f"recall@1={retrieve_top1/(i+1):.3f}  "
                   f"recall@{args.k}={retrieve_topk/(i+1):.3f}  "
                   f"RAG-ans={answer_in_response/(i+1):.3f}  "
-                  f"no-RAG-ans={answer_in_response_rerank/(i+1):.3f}",
+                  f"no-RAG-ans={answer_in_response_rerank/(i+1):.3f}  "
+                  f"extr-ans={answer_in_response_extr/(i+1):.3f}",
                   flush=True)
 
     n = len(cases)
@@ -124,15 +134,18 @@ def run():
     rk = retrieve_topk / n
     a_rag = answer_in_response / n
     a_no = answer_in_response_rerank / n
+    a_ex = answer_in_response_extr / n
     summary = (
         "\n" + "=" * 60 + "\n"
         f"RAG BENCHMARK ({n} questions, k={args.k}, max_tokens={args.max_tokens})\n"
         + "=" * 60 + "\n"
-        f"  retrieval recall@1:   {r1:.3f} ({retrieve_top1}/{n})\n"
-        f"  retrieval recall@{args.k}:   {rk:.3f} ({retrieve_topk}/{n})\n"
-        f"  answer containment  (RAG):    {a_rag:.3f} ({answer_in_response}/{n})\n"
-        f"  answer containment  (no-RAG): {a_no:.3f} ({answer_in_response_rerank}/{n})\n"
-        f"  lift from retrieval:  {a_rag - a_no:+.3f}\n"
+        f"  retrieval recall@1:      {r1:.3f} ({retrieve_top1}/{n})\n"
+        f"  retrieval recall@{args.k}:      {rk:.3f} ({retrieve_topk}/{n})\n"
+        f"  answer containment  (extractive):  {a_ex:.3f} ({answer_in_response_extr}/{n})\n"
+        f"  answer containment  (RAG gen):     {a_rag:.3f} ({answer_in_response}/{n})\n"
+        f"  answer containment  (no-RAG):      {a_no:.3f} ({answer_in_response_rerank}/{n})\n"
+        f"  lift  extr-vs-no-RAG:     {a_ex - a_no:+.3f}\n"
+        f"  lift  extr-vs-RAG-gen:    {a_ex - a_rag:+.3f}\n"
     )
     print(summary, flush=True)
     log_lines.append(summary)

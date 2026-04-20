@@ -149,42 +149,136 @@ from a less-pruned source.
 
 300 SQuAD v1.1 dev questions sampled with seed 7, top-k=3 retrieval,
 chunked retrieval index (46,586 chunks × 80 content tokens), tuned
-BM25 (k1=1.2, b=0.5, blend=0.85):
+BM25 (k1=1.2, b=0.5, blend=0.85). **v13 unlocks extractive QA by
+raising the span window — `max_span` default 8 → 100 — no retraining.**
 
 | metric | value |
 |---|---|
-| retrieval recall@1 (hybrid BM25 + SIF) | **53.3 %** |
-| retrieval recall@1 (+ query-adaptive reranker, opt-in) | 54.0 % |
-| retrieval recall@3 | 68.3 % |
-| retrieval recall@10 | 78.0 % |
+| retrieval recall@1 (hybrid BM25 + SIF) | 53.0 % |
+| retrieval recall@3 | 68.0 % |
 | answer containment — no retrieval | 0.3 % |
-| answer containment — heuristic extractive (v4) | 7.7 % |
-| answer containment — MLP ensemble (v5, 2.4K QA) | 8.7 % |
-| answer containment — MLP ensemble (v6, 9.6K QA) | 9.0 % |
-| answer containment — **MLP ensemble (v8, POP 96, 1500 gens, deployed)** | **9.7 %** |
-| extractive F1 | 0.077 |
-| answer containment — RAG generation | 6.0 % |
-| extractive F1 | 0.065 |
-| conditional extraction (given recall@1 hit) | ~13 % |
+| answer containment — RAG generation (`generate_rag`) | 6.0 % |
+| answer containment — **extractive, v13 default** (`generate_qa`) | **23.7 %** |
+| conditional extraction (given recall@3 hit) | 34.8 % |
+| empty-extraction failure rate | 29.3 % (88/300) |
 
-**~26× lift from retrieval** on answer containment (0.3 % → 7.7 %).
-The query-adaptive retrieval reranker at
-`checkpoints/retrieval_reranker.pkl` is shipped but OFF by default —
-on the held-out dev set it adds ~0.7 pp at recall@1 and loses ~1 pp
-at recall@3. Enable by setting `model._use_reranker = True` after
-loading.
-Retrieval is hybrid BM25 + SIF-weighted cosine on 46,586 paragraph
-chunks extracted from SQuAD train + dev Wikipedia passages
-(paragraphs are split into 80-token windows with 20-token overlap,
-which concentrates lexical match signal on the answer neighborhood).
+**~79× lift from retrieval** on answer containment (0.3 % → 23.7 %).
+Reproduce the numbers above with `python3 bench_rag.py --n-questions 300`
+(now includes an `extractive` column) or `python3 bench_span_sweep.py`
+for the full span-length sweep.
+
+### `max_span` sweep (same bench, same model)
+
+| `max_span` | answer containment | r@3 conversion |
+|---|---|---|
+| 8 (pre-v13 default) | 7.3 % (22/300) | 10.8 % |
+| 20 | 12.3 % (37/300) | 18.1 % |
+| 40 | 17.3 % (52/300) | 25.5 % |
+| 60 | 20.7 % (62/300) | 30.4 % |
+| **100 (v13 default)** | **23.7 % (71/300)** | **34.8 %** |
+
+The old `max_span=8` default was often stopping the extractor one or
+two tokens before the gold answer. A single-line fix yields 3.2×
+containment with no retraining. Extractive QA also beats generative
+RAG by **4×** on the same 300 questions (23.7 % vs 6.0 %).
+
+### Annotated samples — when it works
+
+Real extractions at `max_span=100`, pulled from the 71 hits (seed 11):
+
+```
+Q: What do extremely unequal societies tend to be?
+gold: "politically and socially unstable"
+extr: "unequal societies tend to be politically and socially
+       unstable, which is reflected in lower rates of investment."
+
+Q: What occurs when traveling across a surface at a constant velocity
+   with regard to friction?
+gold: "dynamic equilibrium"
+extr: "dynamic equilibrium occurs in constant velocity motion across
+       surface with kinetic friction. in such situation, force is
+       applied in the direction of motion while the kinetic friction
+       force exactly opposes the applied f..."
+
+Q: In what series did ABC present its 1950s film adaptations?
+gold: "Warner Bros. Presents"
+extr: "warner tried with mixed success to adapt some of its most
+       successful films as abc television series, and showcase these
+       adaptations as part of the wheel series warner bros. presents..."
+
+Q: Friedrich Ratzel thought what was needed for a state to survive?
+gold: "imperialism"
+extr: "races of highest social efficiency. many others argued that
+       imperialism is justified for several different reasons. friedrich
+       believed that in order for state to survive, imperialism was
+       needed..."
+
+Q: How many types of movements do euplokamis tentilla have?
+gold: "three types of movement"
+extr: "...tentilla have three types of movement that are used in
+       capturing prey..."
+```
+
+### Annotated samples — when it fails
+
+Three failure modes account for the 229 misses (76 %). Each is an
+opportunity for a targeted follow-up.
+
+**(1) Wrong span picked inside the correct passage** (≈100/300).
+Scorer latches onto query-word lexical matches that aren't the answer:
+
+```
+Q: How did Tesla lose his tuition money?
+gold: "gambled"
+extr: "exceptions on tuition fees. in many european countries, it is
+       possible to study without tuition fees..."
+```
+"tuition" scored high (query-word match), "gambled" appears later in
+the same passage but the span window started in the wrong place.
+This is the **biggest remaining lever** — a better span-start
+classifier would attack it directly.
+
+**(2) Retrieval returned the wrong passage** (≈32 % of all questions,
+per `recall@3 = 68 %`):
+
+```
+Q: What was Isiah Bowman's nickname as known by the public?
+gold: "Wilson's geographer"
+extr: "bird migration routes have been studied by variety of
+       techniques including the oldest, marking..."
+```
+No overlap — BM25+SIF returned a bird-migration article. Fixing this
+requires improving retrieval itself (query-adaptive blend, topic-
+aware features, or a genuinely retrieval-specialized encoder — see
+the v12 entry in `CHANGELOG.md` for why the LM-trained attention
+stack is *not* that encoder).
+
+**(3) Empty extraction** (88/300, 29.3 % of questions):
+
+```
+Q: When did France take control of Algeria?
+gold: "1830"
+extr: ""
+
+Q: Who claimed that the name Black Death first appeared in 1631?
+gold: "Gasquet"
+extr: ""
+```
+`extract_answer` returns empty when no span scores above its
+acceptance threshold. The threshold is over-conservative — relaxing
+it (always return the top-scoring span even if low-confidence) is a
+likely +5 pp win that hasn't been measured yet.
+
+---
 
 Chunk embeddings are stored int8-quantized to fit under GitHub's file
-size limit. Extraction searches for the best span inside the matched
-chunk; generation augments the candidate pool with inverse-document-
-frequency-weighted tokens from the whole parent paragraph.
+size limit. The query-adaptive retrieval reranker at
+`checkpoints/retrieval_reranker.pkl` ships but is OFF by default (on
+dev it adds ~0.7 pp at r@1, loses ~1 pp at r@3). Enable with
+`model._use_reranker = True`.
 
-See `RAG_V1_REPORT.md` and `RAG_V2_REPORT.md` for ablations and the
-full build path.
+See `RAG_V1_REPORT.md` and `RAG_V2_REPORT.md` for earlier ablations
+and `CHANGELOG.md` for the full per-version history.
 
 ## Generation diversity
 

@@ -1,0 +1,86 @@
+{
+  "stats": {
+    "n": 300,
+    "hits": 71,
+    "misses": 229,
+    "empty": 88
+  },
+  "hits": [
+    {
+      "q": "Friedrich Ratzel thought what was needed for a state to survive?",
+      "gold": "imperialism",
+      "extr": "races of highest social efficiency . many others argued that imperialism is justified for several different reasons . friedrich believed that in order for state to survive , imperialism was needed . halford mackinder felt that great britain needed to be one of the greatest imperialists and therefore justified imperialism . the purportedly scientific nature of social darwinism and theory of races formed supposedly rational justification for imperialism . the rhetoric of being racially superior appears to have achieved .",
+      "is_empty": false
+    },
+    {
+      "q": "What do extremely unequal societies tend to be?",
+      "gold": "politically and socially unstable",
+      "extr": "unequal societies tend to be politically and socially unstable , which is reflected in lower rates of investment .",
+      "is_empty": false
+    },
+    {
+      "q": "In what series did ABC present it's 1950s film adaptations in?",
+      "gold": "Warner Bros. Presents",
+      "extr": "warner tried with mixed success to adapt some of its most successful films as abc television series , and showcase these adaptations as part of the wheel series warner bros . presents . airing during the season , it showcased television adaptations of the 1942 films kings row and casablanca cheyenne adapted from the 1947 film wyoming kid remake of the 1954 film the boy from oklahoma and maverick . however , the most iconic of abc's relationships with hollywood .",
+      "is_empty": false
+    },
+    {
+      "q": "What occurs when traveling across a surface at a constant velocity with regard to friction?",
+      "gold": "dynamic equilibrium",
+      "extr": "dynamic equilibrium occurs in constant velocity motion across surface with kinetic friction . in such situation , force is applied in the direction of motion while the kinetic friction force exactly opposes the applied force . this results in zero net force , but since the object started with velocity , it continues to move with velocity . aristotle misinterpreted this motion as being caused by the applied force . however , when kinetic friction .",
+      "is_empty": false
+    },
+    {
+      "q": "How many times did plague occur in Venice?",
+      "gold": "22 times between 1361 and 1528",
+      "extr": "1350 to 1490 . plague epidemics ravaged london in 1563 , 1593 , 1603 , 1625 , 1636 , and 1665 , reducing its population by 10 to 30 during those years . over 10 of population died in , and again in , 1655 , and 1664 . plague occurred in venice 22 times between and 1528 . the plague of killed 50,000 in venice , almost third of the population . late outbreaks .",
+      "is_empty": false
+    },
+    {
+      "q": "How many types of movements do euplokamis tentilla have?",
+      "gold": "three types of movement",
+      "extr": "cell type otherwise unknown in the phylum ctenophora and they are coiled when relaxed , while the tentilla of all other known ctenophores elongate when relaxed . tentilla have three types of movement that are used in capturing prey they may flick out very quickly in 40 to 60 milliseconds they can wriggle , which may lure prey by behaving like small planktonic worms and they coil round prey . the unique flicking is an movement powered by contraction .",
+      "is_empty": false
+    }
+  ],
+  "miss_wrong_span": [
+    {
+      "q": "What was Isiah Bowman nick name, as known by the public.",
+      "gold": "Wilson's geographer",
+      "extr": "bird migration routes have been studied by variety of techniques including the oldest , marking . swans have been marked with nick on the beak since about 1560 in england . scientific ringing was pioneered by hans christian cornelius mortensen in 1899 . other techniques include radar and satellite tracking .",
+      "is_empty": false
+    },
+    {
+      "q": "What was formed to introduce changes that would reflect the nation's sovereignty?",
+      "gold": "Ominde Commission",
+      "extr": "12 december 1963 , an authority named the commission was formed to introduce changes that would reflect the nation's sovereignty . the commission focused on identity and unity , which were critical issues at the time . changes in the subject content of history and geography were made to reflect national cohesion . between 1964 and 1985 .",
+      "is_empty": false
+    },
+    {
+      "q": "In what book did Betty Meggers describe the idea of the Amazon being sparsely populated?",
+      "gold": "Amazonia: Man and Culture in a Counterfeit Paradise",
+      "extr": "amazon rainforest was only ever sparsely populated , as it was impossible to sustain large population through agriculture given the poor soil . betty meggers was prominent proponent of this idea , as described in her book amazonia man and culture in counterfeit paradise . she claimed that population density of 0.2 inhabitants per square kilometre mi is the maximum that can be sustained in the rainforest .",
+      "is_empty": false
+    },
+    {
+      "q": "How did Tesla lose his tuition money?",
+      "gold": "gambled",
+      "extr": "exceptions on tuition fees . in many european countries , it is possible to study without tuition fees . public universities in nordic countries were entirely without tuition fees until around 2005 . denmark , sweden and finland then moved to put in place tuition fees for foreign students . citizens of eu and member states and citizens from switzerland remain exempted from tuition fees , and the amounts of public grants granted to promising foreign .",
+      "is_empty": false
+    }
+  ],
+  "miss_empty": [
+    {
+      "q": "Who claimed that the name Black Death first appeared in 1631?",
+      "gold": "Gasquet",
+      "extr": "",
+      "is_empty": true
+    },
+    {
+      "q": "When did France take control of Algeria?",
+      "gold": "1830",
+      "extr": "",
+      "is_empty": true
+    }
+  ]
+}
